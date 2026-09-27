@@ -98,8 +98,8 @@ void loadStoredWiFi() {
     String storedPASS = preferences.getString("pass", "");
     preferences.end();
 
-    // Jika di memori NVS masih tersimpan hotspot lama "Jazz", otomatis ganti ke router TP-Link
-    if (storedSSID == "Jazz") {
+    // Jika di memori NVS masih tersimpan hotspot lama "Jazz" atau "Ade", pastikan terhubung ke Ade
+    if (storedSSID == "Jazz" || storedSSID == "Ade") {
         saveWiFiToNVS("Ade", "12345678");
         storedSSID = "Ade";
         storedPASS = "12345678";
