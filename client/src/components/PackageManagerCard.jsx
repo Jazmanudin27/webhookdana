@@ -103,35 +103,35 @@ export default function PackageManagerCard({ onPackagesChanged }) {
   };
 
   return (
-    <div className="glass-panel rounded-2xl p-6 border border-slate-800">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-800/80">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2.5 bg-purple-500/10 text-purple-400 rounded-xl">
+    <div className="bg-white/95 border-2 border-sky-300 shadow-xl shadow-sky-900/10 rounded-3xl p-6 sm:p-7">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-sky-200">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-sky-100 text-[#0284c7] rounded-2xl border border-sky-200 shadow-sm">
             <Package className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-white text-lg">Kelola Paket & Harga Air</h3>
-            <p className="text-xs text-slate-400">Atur literan, harga (Rp), dan label paket isi ulang</p>
+            <h3 className="font-black text-[#034078] text-lg">Kelola Paket & Harga Air</h3>
+            <p className="text-xs text-sky-800/80 font-medium">Atur literan, harga (Rp), dan label paket isi ulang</p>
           </div>
         </div>
 
         <button
           type="button"
           onClick={resetForm}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs font-semibold rounded-xl text-slate-300 hover:text-white transition-all"
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-50 border border-sky-300 hover:bg-sky-100 text-xs font-black rounded-xl text-[#0284c7] transition-all shadow-sm cursor-pointer"
         >
-          <Plus className="w-3.5 h-3.5" />
+          <Plus className="w-4 h-4" />
           <span>Tambah Paket Baru</span>
         </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Form Tambah / Edit Paket */}
-        <div className="lg:col-span-5 bg-slate-900/70 p-5 rounded-2xl border border-slate-800">
-          <h4 className="text-sm font-bold text-white mb-4 flex items-center justify-between">
+        <div className="lg:col-span-5 bg-sky-50/60 p-5 rounded-2xl border-2 border-sky-200 shadow-sm">
+          <h4 className="text-sm font-black text-[#034078] mb-4 flex items-center justify-between">
             <span>{editingId ? '✏️ Edit Paket Air' : '➕ Tambah Paket Air Baru'}</span>
             {editingId && (
-              <button onClick={resetForm} className="text-xs text-slate-400 hover:text-white flex items-center gap-1">
+              <button onClick={resetForm} className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 font-bold">
                 <X className="w-3.5 h-3.5" /> Batal
               </button>
             )}
@@ -139,7 +139,7 @@ export default function PackageManagerCard({ onPackagesChanged }) {
 
           <form onSubmit={handleSubmit} className="space-y-3.5">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
+              <label className="block text-xs font-extrabold text-sky-900 mb-1">
                 Nama Paket
               </label>
               <input
@@ -148,14 +148,14 @@ export default function PackageManagerCard({ onPackagesChanged }) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Contoh: 1 Galon (19L) / Botol 1.5L"
                 required
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-purple-500 font-sans"
+                className="w-full bg-white border-2 border-sky-200 rounded-xl px-3 py-2 text-xs text-[#034078] font-bold placeholder-sky-400 focus:outline-none focus:border-[#0284c7] font-sans shadow-inner"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center gap-1">
-                  <Droplet className="w-3 h-3 text-cyan-400" /> Volume (Liter)
+                <label className="block text-xs font-extrabold text-sky-900 mb-1 flex items-center gap-1">
+                  <Droplet className="w-3 h-3 text-[#0284c7]" /> Volume (Liter)
                 </label>
                 <input
                   type="number"
@@ -165,13 +165,13 @@ export default function PackageManagerCard({ onPackagesChanged }) {
                   onChange={(e) => setLiters(e.target.value)}
                   placeholder="19"
                   required
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                  className="w-full bg-white border-2 border-sky-200 rounded-xl px-3 py-2 text-xs text-[#034078] font-mono font-bold focus:outline-none focus:border-[#0284c7] shadow-inner"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center gap-1">
-                  <DollarSign className="w-3 h-3 text-emerald-400" /> Harga (Rp)
+                <label className="block text-xs font-extrabold text-sky-900 mb-1 flex items-center gap-1">
+                  <DollarSign className="w-3 h-3 text-emerald-600" /> Harga (Rp)
                 </label>
                 <input
                   type="number"
@@ -181,13 +181,13 @@ export default function PackageManagerCard({ onPackagesChanged }) {
                   onChange={(e) => setPrice(e.target.value)}
                   placeholder="7000"
                   required
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                  className="w-full bg-white border-2 border-sky-200 rounded-xl px-3 py-2 text-xs text-emerald-700 font-mono font-bold focus:outline-none focus:border-[#0284c7] shadow-inner"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
+              <label className="block text-xs font-extrabold text-sky-900 mb-1">
                 Label Badge (Opsional)
               </label>
               <input
@@ -195,13 +195,13 @@ export default function PackageManagerCard({ onPackagesChanged }) {
                 value={badge}
                 onChange={(e) => setBadge(e.target.value)}
                 placeholder="Contoh: Populer / Hemat / Promo"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-purple-500 font-sans"
+                className="w-full bg-white border-2 border-sky-200 rounded-xl px-3 py-2 text-xs text-[#034078] font-bold placeholder-sky-400 focus:outline-none focus:border-[#0284c7] font-sans shadow-inner"
               />
             </div>
 
             {statusMsg && (
-              <div className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
-                statusMsg.type === 'success' ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-500/30' : 'bg-rose-950/40 text-rose-300 border border-rose-500/30'
+              <div className={`p-2.5 rounded-xl text-xs flex items-center gap-2 font-bold ${
+                statusMsg.type === 'success' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'
               }`}>
                 {statusMsg.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
                 <span>{statusMsg.text}</span>
@@ -211,7 +211,7 @@ export default function PackageManagerCard({ onPackagesChanged }) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 px-4 bg-purple-600 hover:bg-purple-500 active:scale-[0.99] text-white font-bold rounded-xl text-xs shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2 transition-all"
+              className="w-full py-2.5 px-4 bg-gradient-to-r from-[#0284c7] to-[#0ea5e9] hover:from-[#0369a1] hover:to-[#0284c7] active:scale-[0.99] text-white font-black rounded-xl text-xs shadow-md shadow-sky-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <Save className="w-3.5 h-3.5" />
               <span>{editingId ? 'Simpan Perubahan' : 'Tambah Paket Air'}</span>
@@ -221,9 +221,9 @@ export default function PackageManagerCard({ onPackagesChanged }) {
 
         {/* Tabel Daftar Paket yang Ada */}
         <div className="lg:col-span-7">
-          <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
+          <div className="bg-white rounded-2xl border-2 border-sky-200 overflow-hidden shadow-sm">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
+              <thead className="bg-sky-50 text-sky-900 font-black border-b border-sky-200">
                 <tr>
                   <th className="py-3 px-4">Nama Paket</th>
                   <th className="py-3 px-3">Volume</th>
@@ -232,46 +232,46 @@ export default function PackageManagerCard({ onPackagesChanged }) {
                   <th className="py-3 px-4 text-right">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono">
+              <tbody className="divide-y divide-sky-100 font-mono">
                 {packages.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="py-8 text-center text-slate-500 font-sans">
+                    <td colSpan="5" className="py-8 text-center text-sky-800/60 font-sans">
                       Belum ada paket air. Tambahkan melalui form di samping.
                     </td>
                   </tr>
                 ) : (
                   packages.map((pkg) => (
-                    <tr key={pkg.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="py-3.5 px-4 font-sans font-bold text-white">
+                    <tr key={pkg.id} className="hover:bg-sky-50/50 transition-colors">
+                      <td className="py-3.5 px-4 font-sans font-bold text-[#034078]">
                         {pkg.name}
                       </td>
-                      <td className="py-3.5 px-3 text-cyan-300">
+                      <td className="py-3.5 px-3 text-[#0284c7] font-bold">
                         {pkg.liters} L
                       </td>
-                      <td className="py-3.5 px-3 text-emerald-400 font-bold">
+                      <td className="py-3.5 px-3 text-emerald-600 font-bold">
                         Rp {pkg.price.toLocaleString('id-ID')}
                       </td>
                       <td className="py-3.5 px-3 font-sans">
                         {pkg.badge ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-sky-100 text-[#0284c7] border border-sky-300">
                             {pkg.badge}
                           </span>
                         ) : (
-                          <span className="text-slate-600">-</span>
+                          <span className="text-slate-400">-</span>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-right font-sans">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => handleEdit(pkg)}
-                            className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-blue-400 transition-colors"
+                            className="p-1.5 hover:bg-sky-100 rounded-lg text-sky-700 hover:text-sky-900 transition-colors cursor-pointer"
                             title="Edit Paket"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleDelete(pkg.id, pkg.name)}
-                            className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-rose-400 transition-colors"
+                            className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-600 hover:text-rose-800 transition-colors cursor-pointer"
                             title="Hapus Paket"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -285,7 +285,7 @@ export default function PackageManagerCard({ onPackagesChanged }) {
             </table>
           </div>
 
-          <p className="text-[11px] text-slate-500 mt-2">
+          <p className="text-[11px] text-sky-800/80 font-medium mt-2">
             💡 Setiap paket yang Anda buat atau ubah di sini akan langsung tampil pada tombol pemilihan di <strong>Kiosk Pembelian</strong> dan otomatis disinkronkan ke ESP32 saat transaksi dibuat!
           </p>
         </div>

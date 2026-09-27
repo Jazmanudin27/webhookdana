@@ -96,52 +96,52 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
   };
 
   return (
-    <div className="glass-card rounded-3xl p-6 sm:p-7 border border-sky-500/25 flex flex-col h-full relative overflow-hidden">
+    <div className="bg-white/95 border-2 border-sky-300 shadow-xl shadow-sky-900/10 rounded-3xl p-6 sm:p-7 flex flex-col h-full relative overflow-hidden">
       {/* Background Subtle Gradient */}
-      <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-0 w-64 h-64 bg-sky-200/40 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5 pb-4 border-b border-sky-500/20 relative z-10">
+      {/* Header - AIRO Touchscreen Style */}
+      <div className="flex items-center justify-between mb-5 pb-4 border-b border-sky-200 relative z-10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#0284c7] via-[#0ea5e9] to-cyan-300 flex items-center justify-center text-white shadow-lg shadow-sky-500/30 ring-2 ring-cyan-400/30">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-[#0284c7] via-[#0ea5e9] to-[#38bdf8] flex items-center justify-center text-white shadow-md shadow-sky-500/30 ring-2 ring-sky-300">
             <CreditCard className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-sky-100 to-cyan-300 text-lg tracking-tight">Kiosk DANA QRIS</h3>
-            <p className="text-xs text-sky-200/70">Pilih paket air & bayar non-tunai</p>
+            <h3 className="font-black text-[#034078] text-lg tracking-tight">SELAMAT DATANG</h3>
+            <p className="text-xs text-sky-700 font-semibold">Pilih Layanan Pengisian Air & Bayar QRIS</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-          DANA SANDBOX
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-100 border border-sky-300 text-[#0284c7] text-xs font-black shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse" />
+          DANA QRIS
         </div>
       </div>
 
       {/* ⚠️ BANNER PERINGATAN JIKA ESP32 OFFLINE / GANGGUAN */}
       {isDeviceOffline && (
-        <div className="mb-5 p-4 rounded-2xl bg-rose-950/70 border border-rose-500/40 shadow-xl shadow-rose-950/40 text-left relative z-10 animate-pulse">
+        <div className="mb-5 p-4 rounded-2xl bg-rose-50 border-2 border-rose-300 shadow-md text-left relative z-10 animate-pulse">
           <div className="flex items-start gap-3">
-            <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400 mt-0.5 flex-shrink-0">
+            <div className="p-2 rounded-xl bg-rose-100 text-rose-600 mt-0.5 flex-shrink-0">
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div className="flex-1">
-              <h4 className="text-sm font-extrabold text-rose-300 tracking-tight flex items-center gap-2">
+              <h4 className="text-sm font-black text-rose-800 tracking-tight flex items-center gap-2">
                 MESIN DEPOT SEDANG GANGGUAN / OFFLINE
               </h4>
-              <p className="text-xs text-rose-200/90 mt-1 leading-relaxed">
+              <p className="text-xs text-rose-700 mt-1 leading-relaxed font-medium">
                 Mohon maaf, mesin pengisian air otomatis saat ini <strong>tidak dapat digunakan</strong> karena perangkat pengisi belum terhubung atau sedang dalam pemeliharaan.
               </p>
-              <div className="mt-3 pt-2.5 border-t border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-[11px] text-rose-300 font-semibold flex items-center gap-1.5">
+              <div className="mt-3 pt-2.5 border-t border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-[11px] text-rose-800 font-bold flex items-center gap-1.5">
                   <UserX className="w-3.5 h-3.5" /> Silahkan Hubungi Admin / Karyawan Depot
                 </span>
                 <a
                   href="https://wa.me/6281234567890?text=Halo%20Admin%20Depot%2C%20mesin%20pengisian%20air%20sedang%20offline%20atau%20gangguan"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all shadow-md self-start sm:self-auto"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black transition-all shadow-md self-start sm:self-auto"
                 >
-                  <MessageSquare className="w-3 h-3" />
+                  <MessageSquare className="w-3.5 h-3.5" />
                   <span>Hubungi Admin (WhatsApp)</span>
                 </a>
               </div>
@@ -151,7 +151,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
       )}
 
       {/* Dynamic Package Cards Grid */}
-      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4 relative z-10 ${isDeviceOffline ? 'opacity-40 pointer-events-none' : ''}`}>
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4 relative z-10 ${isDeviceOffline ? 'opacity-40 pointer-events-none' : ''}`}>
         {packages.map((pkg) => {
           const isSelected = !isCustom && selectedPackageId === pkg.id;
           return (
@@ -163,28 +163,29 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
                 setSelectedPackageId(pkg.id);
                 setIsCustom(false);
               }}
-              className={`p-3.5 rounded-2xl border text-left transition-all duration-300 relative group ${
+              className={`p-3.5 rounded-2xl border-2 text-left transition-all duration-300 relative group cursor-pointer ${
                 isSelected
-                  ? 'bg-gradient-to-b from-[#0369a1]/40 via-[#075985]/50 to-[#0c4a6e]/60 border-cyan-400 shadow-xl shadow-sky-600/30 ring-2 ring-cyan-400/40 scale-[1.02]'
-                  : 'bg-[#06244d]/70 border-sky-500/30 hover:border-cyan-400/50 hover:bg-[#072a5a]'
+                  ? 'bg-gradient-to-br from-sky-50 via-sky-100/70 to-blue-50 border-[#0284c7] shadow-lg shadow-sky-500/20 ring-2 ring-sky-300 scale-[1.02]'
+                  : 'bg-white border-sky-200 hover:border-sky-300 hover:bg-sky-50/40 shadow-sm'
               }`}
             >
               {pkg.badge && (
-                <span className="inline-block text-[10px] font-black text-cyan-200 bg-cyan-500/30 px-2 py-0.5 rounded-full mb-1 border border-cyan-400/40">
+                <span className="inline-block text-[10px] font-black text-[#0284c7] bg-sky-100 px-2 py-0.5 rounded-full mb-1 border border-sky-300">
                   {pkg.badge}
                 </span>
               )}
-              <div className="text-xs font-bold text-white truncate group-hover:text-cyan-200 transition-colors">
+              <div className="text-xs font-black text-[#034078] truncate">
                 {pkg.name}
               </div>
-              <div className="text-[11px] text-cyan-400 font-mono mt-0.5">
-                {pkg.liters} Liter
+              <div className="text-[11px] text-sky-700 font-mono font-bold mt-0.5 flex items-center gap-1">
+                <Droplet className="w-3 h-3 text-[#0284c7]" />
+                <span>{pkg.liters} Liter</span>
               </div>
-              <div className="text-sm font-black text-emerald-400 font-mono mt-1.5">
+              <div className="text-sm font-black text-[#0284c7] font-mono mt-1.5">
                 Rp {pkg.price.toLocaleString('id-ID')}
               </div>
               {isSelected && (
-                <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400 animate-ping" />
+                <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-[#0284c7] shadow-sm animate-ping" />
               )}
             </button>
           );
@@ -195,18 +196,18 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
           type="button"
           disabled={isDeviceOffline}
           onClick={() => setIsCustom(true)}
-          className={`p-3.5 rounded-2xl border text-left transition-all duration-300 relative ${
+          className={`p-3.5 rounded-2xl border-2 text-left transition-all duration-300 relative cursor-pointer ${
             isCustom
-              ? 'bg-gradient-to-b from-purple-600/25 to-purple-900/30 border-purple-400 shadow-lg shadow-purple-600/25 ring-2 ring-purple-400/30 scale-[1.02]'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+              ? 'bg-purple-50 border-purple-400 shadow-md ring-2 ring-purple-300 scale-[1.02]'
+              : 'bg-white border-sky-200 hover:border-purple-300 hover:bg-purple-50/30 shadow-sm'
           }`}
         >
-          <span className="inline-block text-[10px] font-black text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full mb-1 border border-purple-500/30">
+          <span className="inline-block text-[10px] font-black text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full mb-1 border border-purple-200">
             Kustom
           </span>
-          <div className="text-xs font-bold text-white">Liter Bebas</div>
-          <div className="text-[11px] text-purple-300 font-mono mt-0.5">{customLiter} Liter</div>
-          <div className="text-sm font-black text-purple-400 font-mono mt-1.5">
+          <div className="text-xs font-black text-[#034078]">Liter Bebas</div>
+          <div className="text-[11px] text-purple-700 font-mono font-bold mt-0.5">{customLiter} Liter</div>
+          <div className="text-sm font-black text-purple-700 font-mono mt-1.5">
             Rp {getActivePrice().toLocaleString('id-ID')}
           </div>
         </button>
@@ -214,10 +215,10 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
 
       {/* Input if custom */}
       {isCustom && !isDeviceOffline && (
-        <div className="mb-4 bg-purple-950/30 p-3.5 rounded-2xl border border-purple-500/30 relative z-10">
-          <label className="block text-xs font-bold text-purple-300 mb-1.5 flex items-center justify-between">
+        <div className="mb-4 bg-purple-50 p-3.5 rounded-2xl border-2 border-purple-300 relative z-10">
+          <label className="block text-xs font-black text-purple-900 mb-1.5 flex items-center justify-between">
             <span>Masukkan Volume Air (Liter):</span>
-            <span className="text-purple-200 font-mono">{customLiter} L</span>
+            <span className="text-purple-700 font-mono font-black">{customLiter} L</span>
           </label>
           <input
             type="number"
@@ -226,14 +227,14 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
             max="100"
             value={customLiter}
             onChange={(e) => setCustomLiter(e.target.value)}
-            className="w-full bg-slate-950 border border-purple-500/40 rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+            className="w-full bg-white border-2 border-purple-300 rounded-xl px-3.5 py-2 text-xs text-purple-950 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-400 shadow-inner"
           />
         </div>
       )}
 
       {/* Customer Name Input */}
       <div className={`mb-4 relative z-10 ${isDeviceOffline ? 'opacity-40 pointer-events-none' : ''}`}>
-        <label className="block text-xs font-bold text-slate-400 mb-1.5">
+        <label className="block text-xs font-extrabold text-sky-900 mb-1.5">
           Nama Pembeli (Opsional)
         </label>
         <input
@@ -242,7 +243,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
           onChange={(e) => setCustomerName(e.target.value)}
           placeholder="Contoh: Budi Santoso"
           disabled={isDeviceOffline}
-          className="w-full bg-[#031735]/90 border border-sky-500/30 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-sky-300/40 focus:outline-none focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300 font-sans shadow-inner"
+          className="w-full bg-white border-2 border-sky-200 rounded-2xl px-4 py-2.5 text-xs text-[#034078] font-bold placeholder-sky-400 focus:outline-none focus:border-[#0284c7] focus:ring-2 focus:ring-sky-200 shadow-inner"
         />
       </div>
 
@@ -250,16 +251,16 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
       <button
         onClick={handleCreateOrder}
         disabled={isCreating || isDeviceOffline}
-        className={`w-full py-3.5 px-4 font-extrabold rounded-2xl text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all relative z-10 ${
+        className={`w-full py-4 px-4 font-black rounded-2xl text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 transition-all relative z-10 cursor-pointer ${
           isDeviceOffline
-            ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-            : 'bg-gradient-to-r from-[#0284c7] via-[#0ea5e9] to-cyan-400 hover:from-sky-500 hover:to-cyan-300 active:scale-[0.99] text-white shadow-sky-500/35 ring-1 ring-sky-300/40'
+            ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+            : 'bg-gradient-to-r from-[#0284c7] via-[#0ea5e9] to-[#38bdf8] hover:from-[#0369a1] hover:to-[#0284c7] active:scale-[0.99] text-white shadow-sky-500/30'
         }`}
       >
         {isCreating ? (
           <Loader2 className="w-4 h-4 animate-spin" />
         ) : isDeviceOffline ? (
-          <WifiOff className="w-4 h-4 text-slate-500" />
+          <WifiOff className="w-4 h-4 text-slate-400" />
         ) : (
           <QrCode className="w-4 h-4" />
         )}
@@ -272,19 +273,19 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
 
       {/* Active QR Code & Quick Pay Section */}
       {activePendingOrder && !isDeviceOffline && (
-        <div className="mt-5 p-5 rounded-2xl bg-gradient-to-b from-[#06264f] via-[#041c3c] to-[#021124] border border-cyan-400/40 flex flex-col items-center text-center shadow-2xl relative z-10 animate-fadeIn">
+        <div className="mt-5 p-5 rounded-3xl bg-gradient-to-b from-sky-50 via-white to-sky-50 border-2 border-sky-300 flex flex-col items-center text-center shadow-xl relative z-10 animate-fadeIn">
           
           <div className="flex items-center justify-between w-full mb-3.5">
-            <span className="text-xs font-black text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-yellow-300" /> SCAN QRIS DANA
+            <span className="text-xs font-black text-[#034078] uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" /> SCAN QRIS DANA
             </span>
-            <span className="text-[11px] font-mono text-sky-200 bg-[#03152d] px-2.5 py-0.5 rounded-full border border-sky-500/30">
+            <span className="text-[11px] font-mono font-bold text-sky-800 bg-white px-2.5 py-0.5 rounded-full border border-sky-200 shadow-sm">
               {activePendingOrder.orderId}
             </span>
           </div>
 
           {/* QR Code with Holographic Laser Scanner */}
-          <div className="relative p-4 bg-white rounded-3xl shadow-2xl overflow-hidden my-1.5 ring-4 ring-cyan-400/30">
+          <div className="relative p-4 bg-white rounded-3xl shadow-xl overflow-hidden my-1.5 border-2 border-sky-300 ring-4 ring-sky-200">
             <div className="laser-line" />
             <QRCodeSVG
               value={activePendingOrder.qrString || activePendingOrder.orderId}
@@ -294,19 +295,19 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
             />
           </div>
 
-          <div className="text-xs text-sky-200/80 mt-2.5">
+          <div className="text-xs text-sky-800 font-semibold mt-2.5">
             Scan dari aplikasi DANA Sandbox atau klik tombol simulasi di bawah:
           </div>
 
           <button
             onClick={() => handleQuickPay(activePendingOrder.orderId)}
             disabled={isSimulating}
-            className="w-full mt-3.5 py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-emerald-600/35 flex items-center justify-center gap-2 transition-all disabled:opacity-50 ring-2 ring-emerald-400/30"
+            className="w-full mt-3.5 py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 ring-2 ring-emerald-300 cursor-pointer"
           >
             {isSimulating ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <Sparkles className="w-4 h-4 text-yellow-300" />
+              <Sparkles className="w-4 h-4 text-amber-300" />
             )}
             <span>⚡ SIMULASI BAYAR SUKSES (WEBHOOK DANA)</span>
           </button>
