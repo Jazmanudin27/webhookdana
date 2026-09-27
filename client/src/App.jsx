@@ -3,7 +3,6 @@ import { io } from 'socket.io-client';
 import { 
   Droplet, 
   Wifi, 
-  WifiOff, 
   Activity, 
   Zap, 
   TrendingUp, 
@@ -15,7 +14,9 @@ import {
   History,
   Server,
   Layers,
-  Sparkles
+  Sparkles,
+  Database,
+  CheckCircle2
 } from 'lucide-react';
 
 import WaterDispenserVisualizer from './components/WaterDispenserVisualizer';
@@ -37,7 +38,9 @@ export default function App() {
     esp32Status: 'OFFLINE',
     esp32Ip: null,
     totalWaterDispensedToday: 0,
-    totalRevenueToday: 0
+    totalRevenueToday: 0,
+    isMySql: false,
+    databaseType: 'MySQL / MariaDB'
   });
 
   const [telemetry, setTelemetry] = useState({
@@ -54,7 +57,6 @@ export default function App() {
 
   // Initialize Socket.io and initial HTTP data fetch
   useEffect(() => {
-    // 1. Fetch initial status from REST API
     fetch('/api/status')
       .then(res => res.json())
       .then(data => {
@@ -81,14 +83,12 @@ export default function App() {
       })
       .catch(err => console.error('Failed to fetch logs:', err));
 
-    // 2. Setup WebSocket
     const newSocket = io(window.location.origin, {
       transports: ['websocket', 'polling']
     });
 
     newSocket.on('connect', () => {
       setSocketConnected(true);
-      console.log('⚡ Socket.IO Connected');
     });
 
     newSocket.on('disconnect', () => {
@@ -109,11 +109,11 @@ export default function App() {
 
     newSocket.on('order:paid', (order) => {
       setActivePendingOrder(null);
-      setTransactions(prev => prev.map(t => t.orderId === order.orderId ? { ...t, ...order, status: 'PAID' } : t));
+      setTransactions(prev => prev.map(t => (t.orderId === order.orderId || t.merchantTransId === order.orderId) ? { ...t, ...order, status: 'PAID' } : t));
     });
 
     newSocket.on('order:completed', (result) => {
-      setTransactions(prev => prev.map(t => t.orderId === result.orderId ? { ...t, ...result } : t));
+      setTransactions(prev => prev.map(t => (t.orderId === result.orderId || t.merchantTransId === result.orderId) ? { ...t, ...result } : t));
     });
 
     newSocket.on('log:new', (logItem) => {
@@ -131,7 +131,6 @@ export default function App() {
     };
   }, []);
 
-  // Action Handlers
   const handleSimulatePayment = async (orderId) => {
     try {
       const res = await fetch('/api/dana/simulate-pay', {
@@ -157,125 +156,139 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white pb-12">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-blue-500/20">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-                <Droplet className="w-5 h-5 text-cyan-400" />
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black pb-12 relative overflow-hidden font-sans">
+      
+      {/* Dynamic Ambient Blur Mesh */}
+      <div className="absolute top-0 left-1/4 w-[600px] h-[300px] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/3 right-10 w-[500px] h-[300px] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
+
+      {/* Top Header */}
+      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-2xl sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 py-3 flex items-center justify-between">
+          
+          {/* Brand Logo */}
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-[#118EEA] via-blue-600 to-cyan-400 p-0.5 shadow-xl shadow-blue-500/30">
+              <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
+                <Droplet className="w-6 h-6 text-cyan-400 fill-cyan-400/20" />
               </div>
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-bold text-white tracking-tight text-base sm:text-lg">
+                <h1 className="font-black text-white tracking-tight text-lg sm:text-xl">
                   DEPOT AIR DANA
                 </h1>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                  Sandbox IoT
+                <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-[#118EEA]/20 text-cyan-300 border border-cyan-500/30">
+                  SMART IOT
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                Otomatisasi Pengisian Air Terintegrasi Webhook & ESP32
+              <p className="text-[11px] text-slate-400 font-medium">
+                Otomatisasi Pengisian Air Terintegrasi Webhook DANA & ESP32
               </p>
             </div>
           </div>
 
           {/* Right Status Badges */}
-          <div className="flex items-center gap-3">
-            {/* ESP32 Online / Offline Status */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold ${
-              systemState.esp32Status === 'ONLINE'
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-            }`}>
-              {systemState.esp32Status === 'ONLINE' ? (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>ESP32 ONLINE</span>
-                </>
-              ) : (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-rose-400" />
-                  <span>ESP32 OFFLINE</span>
-                </>
-              )}
+          <div className="flex items-center gap-2.5">
+            
+            {/* Database Badge */}
+            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-300">
+              <Database className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{systemState?.databaseType || 'MySQL'}</span>
             </div>
 
-            {/* Socket Status */}
-            <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/80 px-2.5 py-1.5 rounded-xl border border-slate-800 font-mono">
-              <span className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              <span>WS: {socketConnected ? 'Live' : 'Connecting'}</span>
+            {/* ESP32 Online / Offline Status */}
+            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border text-xs font-bold transition-all ${
+              systemState.esp32Status === 'ONLINE'
+                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                : 'bg-rose-500/10 text-rose-300 border-rose-500/40'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${systemState.esp32Status === 'ONLINE' ? 'bg-emerald-400 animate-ping' : 'bg-rose-500'}`} />
+              <span>{systemState.esp32Status === 'ONLINE' ? 'ESP32 ONLINE' : 'ESP32 OFFLINE'}</span>
+            </div>
+
+            {/* WebSocket Status */}
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-2xl border border-slate-800 font-mono">
+              <span className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-cyan-400' : 'bg-amber-400'}`} />
+              <span>WS: {socketConnected ? 'Live' : 'Connect'}</span>
             </div>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 flex-1 w-full space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 flex-1 w-full space-y-6 relative z-10">
         
         {/* Top Summary Stats Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          
           {/* Card 1: Today Revenue */}
-          <div className="glass-panel p-4 rounded-2xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium">Pendapatan Hari Ini</span>
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-emerald-500/40 transition-all">
+            <div className="flex items-center justify-between text-slate-400 mb-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider">Pendapatan Hari Ini</span>
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                <DollarSign className="w-4 h-4" />
+              </div>
             </div>
-            <div className="text-xl sm:text-2xl font-extrabold text-white font-mono">
+            <div className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
               Rp {(systemState.totalRevenueToday || 0).toLocaleString('id-ID')}
             </div>
-            <div className="text-[11px] text-emerald-400/90 mt-1 flex items-center gap-1">
+            <div className="text-[11px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
               <TrendingUp className="w-3 h-3" /> Transaksi DANA Sukses
             </div>
           </div>
 
           {/* Card 2: Liters Dispensed */}
-          <div className="glass-panel p-4 rounded-2xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium">Air Terdistribusi</span>
-              <Droplet className="w-4 h-4 text-cyan-400" />
+          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-cyan-500/40 transition-all">
+            <div className="flex items-center justify-between text-slate-400 mb-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider">Air Terdistribusi</span>
+              <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400">
+                <Droplet className="w-4 h-4" />
+              </div>
             </div>
-            <div className="text-xl sm:text-2xl font-extrabold text-cyan-300 font-mono">
+            <div className="text-xl sm:text-2xl font-black text-cyan-300 font-mono tracking-tight">
               {(systemState.totalWaterDispensedToday || 0).toFixed(1)} <span className="text-sm font-normal text-slate-400">Liter</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">
-              Dihitung via Flow Sensor GPIO 18
+            <div className="text-[11px] text-slate-400 font-medium mt-1">
+              Flow Sensor Metering GPIO 18
             </div>
           </div>
 
           {/* Card 3: Total Orders */}
-          <div className="glass-panel p-4 rounded-2xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium">Total Pesanan</span>
-              <Layers className="w-4 h-4 text-purple-400" />
+          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-purple-500/40 transition-all">
+            <div className="flex items-center justify-between text-slate-400 mb-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider">Total Pesanan</span>
+              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+                <Layers className="w-4 h-4" />
+              </div>
             </div>
-            <div className="text-xl sm:text-2xl font-extrabold text-purple-300 font-mono">
-              {transactions.length} <span className="text-sm font-normal text-slate-400">Order</span>
+            <div className="text-xl sm:text-2xl font-black text-purple-300 font-mono tracking-tight">
+              {transactions.length} <span className="text-sm font-normal text-slate-400">Pesanan</span>
             </div>
-            <div className="text-[11px] text-slate-400 mt-1">
-              {transactions.filter(t => t.status === 'COMPLETED').length} sukses terisi
+            <div className="text-[11px] text-slate-400 font-medium mt-1">
+              {transactions.filter(t => t.status === 'COMPLETED').length} sukses terisi penuh
             </div>
           </div>
 
-          {/* Card 4: Hardware & Webhook Endpoint */}
-          <div className="glass-panel p-4 rounded-2xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium">Domain Webhook</span>
-              <Server className="w-4 h-4 text-blue-400" />
+          {/* Card 4: Webhook Domain */}
+          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-blue-500/40 transition-all">
+            <div className="flex items-center justify-between text-slate-400 mb-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider">Domain Webhook</span>
+              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                <Server className="w-4 h-4" />
+              </div>
             </div>
-            <div className="text-xs font-bold text-white font-mono truncate">
+            <div className="text-xs font-black text-white font-mono truncate">
               {publicBaseUrl.replace('https://', '').replace('http://', '')}
             </div>
-            <div className="text-[11px] text-blue-400 mt-1 font-mono truncate">
+            <div className="text-[11px] text-cyan-400 mt-1 font-mono truncate">
               /api/dana/finish-notify
             </div>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
+        {/* Navigation Tabs Pill Bar */}
+        <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto">
           {[
             { id: 'dashboard', label: 'Monitor & Kiosk', icon: Droplet },
             { id: 'packages', label: 'Kelola Paket Air & Harga', icon: Layers },
@@ -290,10 +303,10 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
                   isActive
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                    ? 'bg-gradient-to-r from-[#118EEA] to-cyan-500 text-white shadow-xl shadow-blue-500/25 scale-[1.02]'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -303,7 +316,7 @@ export default function App() {
           })}
         </div>
 
-        {/* Tab 1: Dashboard (Monitor + Order Simulator) */}
+        {/* Tab 1: Dashboard */}
         {activeTab === 'dashboard' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7">
@@ -323,27 +336,27 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Package & Price Manager */}
+        {/* Tab 2: Packages */}
         {activeTab === 'packages' && (
           <PackageManagerCard onPackagesChanged={() => {}} />
         )}
 
-        {/* Tab 3: WiFi Settings */}
+        {/* Tab 3: WiFi */}
         {activeTab === 'wifi' && (
           <WifiSettingsCard systemState={systemState} />
         )}
 
-        {/* Tab 2: Webhook & Logs Inspector */}
+        {/* Tab 4: Webhook Inspector */}
         {activeTab === 'inspector' && (
           <WebhookInspector logs={logs} />
         )}
 
-        {/* Tab 3: Transaction History */}
+        {/* Tab 5: Transactions */}
         {activeTab === 'transactions' && (
           <TransactionHistory transactions={transactions} />
         )}
 
-        {/* Tab 4: Hardware & Endpoint Docs */}
+        {/* Tab 6: Hardware & Docs */}
         {activeTab === 'hardware' && (
           <HardwareConfigGuide baseUrl={publicBaseUrl} />
         )}
@@ -351,7 +364,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-12 text-center text-xs text-slate-500 font-mono">
+      <footer className="mt-14 text-center text-xs text-slate-500 font-mono">
         AsparTech • Sistem Depot Air Isi Ulang Otomatis Terintegrasi DANA Sandbox & ESP32
       </footer>
     </div>

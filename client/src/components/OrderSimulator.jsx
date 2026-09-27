@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { QrCode, Sparkles, CheckCircle, ShoppingBag, Loader2, RefreshCw, Droplet } from 'lucide-react';
+import { QrCode, Sparkles, ShoppingBag, Loader2, RefreshCw, Droplet, CreditCard, ChevronRight, Check } from 'lucide-react';
 
 export default function OrderSimulator({ onOrderCreated, onSimulatePayment, activePendingOrder }) {
   const [packages, setPackages] = useState([]);
@@ -78,80 +78,93 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
   };
 
   return (
-    <div className="glass-panel rounded-2xl p-6 border border-slate-800 flex flex-col h-full">
-      <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800/80">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl">
-            <ShoppingBag className="w-5 h-5" />
+    <div className="glass-card rounded-3xl p-6 sm:p-7 border border-slate-800 flex flex-col h-full relative overflow-hidden">
+      {/* Background Subtle Gradient */}
+      <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800/80 relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
+            <CreditCard className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-white text-lg">Simulasi Transaksi DANA</h3>
-            <p className="text-xs text-slate-400">Pilih paket air & buat QRIS Sandbox</p>
+            <h3 className="font-extrabold text-white text-lg tracking-tight">Kiosk DANA QRIS</h3>
+            <p className="text-xs text-slate-400">Pilih paket air & bayar non-tunai</p>
           </div>
         </div>
-        <span className="text-[11px] font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-full uppercase tracking-wider">
-          DANA Sandbox
-        </span>
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#118EEA]/20 border border-[#118EEA]/40 text-[#118EEA] text-xs font-black">
+          <span className="w-2 h-2 rounded-full bg-[#118EEA] animate-pulse" />
+          DANA SANDBOX
+        </div>
       </div>
 
       {/* Dynamic Package Cards Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4">
-        {packages.map((pkg) => (
-          <button
-            key={pkg.id}
-            type="button"
-            onClick={() => {
-              setSelectedPackageId(pkg.id);
-              setIsCustom(false);
-            }}
-            className={`p-3 rounded-xl border text-left transition-all relative ${
-              !isCustom && selectedPackageId === pkg.id
-                ? 'bg-blue-600/15 border-blue-500 ring-2 ring-blue-500/20 shadow-md'
-                : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            {pkg.badge && (
-              <span className="inline-block text-[10px] font-semibold text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded mb-1">
-                {pkg.badge}
-              </span>
-            )}
-            <div className="text-xs font-bold text-white truncate">{pkg.name}</div>
-            <div className="text-[11px] text-cyan-300 font-mono mt-0.5">{pkg.liters} Liter</div>
-            <div className="text-xs font-extrabold text-emerald-400 font-mono mt-1">
-              Rp {pkg.price.toLocaleString('id-ID')}
-            </div>
-            {!isCustom && selectedPackageId === pkg.id && (
-              <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-blue-400" />
-            )}
-          </button>
-        ))}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4 relative z-10">
+        {packages.map((pkg) => {
+          const isSelected = !isCustom && selectedPackageId === pkg.id;
+          return (
+            <button
+              key={pkg.id}
+              type="button"
+              onClick={() => {
+                setSelectedPackageId(pkg.id);
+                setIsCustom(false);
+              }}
+              className={`p-3.5 rounded-2xl border text-left transition-all duration-300 relative group ${
+                isSelected
+                  ? 'bg-gradient-to-b from-blue-600/25 to-blue-900/30 border-cyan-400 shadow-lg shadow-blue-600/25 ring-2 ring-cyan-400/30 scale-[1.02]'
+                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+              }`}
+            >
+              {pkg.badge && (
+                <span className="inline-block text-[10px] font-black text-cyan-300 bg-cyan-500/20 px-2 py-0.5 rounded-full mb-1 border border-cyan-500/30">
+                  {pkg.badge}
+                </span>
+              )}
+              <div className="text-xs font-bold text-white truncate group-hover:text-cyan-200 transition-colors">
+                {pkg.name}
+              </div>
+              <div className="text-[11px] text-cyan-400 font-mono mt-0.5">
+                {pkg.liters} Liter
+              </div>
+              <div className="text-sm font-black text-emerald-400 font-mono mt-1.5">
+                Rp {pkg.price.toLocaleString('id-ID')}
+              </div>
+              {isSelected && (
+                <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400 animate-ping" />
+              )}
+            </button>
+          );
+        })}
 
         {/* Custom Liter Button */}
         <button
           type="button"
           onClick={() => setIsCustom(true)}
-          className={`p-3 rounded-xl border text-left transition-all relative ${
+          className={`p-3.5 rounded-2xl border text-left transition-all duration-300 relative ${
             isCustom
-              ? 'bg-purple-600/15 border-purple-500 ring-2 ring-purple-500/20 shadow-md'
-              : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
+              ? 'bg-gradient-to-b from-purple-600/25 to-purple-900/30 border-purple-400 shadow-lg shadow-purple-600/25 ring-2 ring-purple-400/30 scale-[1.02]'
+              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
           }`}
         >
-          <div className="text-[10px] text-purple-300 font-semibold mb-1">Kustom</div>
+          <span className="inline-block text-[10px] font-black text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-full mb-1 border border-purple-500/30">
+            Kustom
+          </span>
           <div className="text-xs font-bold text-white">Liter Bebas</div>
-          <div className="text-xs font-extrabold text-purple-400 font-mono mt-2">
+          <div className="text-[11px] text-purple-300 font-mono mt-0.5">{customLiter} Liter</div>
+          <div className="text-sm font-black text-purple-400 font-mono mt-1.5">
             Rp {getActivePrice().toLocaleString('id-ID')}
           </div>
-          {isCustom && (
-            <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-purple-400" />
-          )}
         </button>
       </div>
 
       {/* Input if custom */}
       {isCustom && (
-        <div className="mb-4 bg-slate-900/80 p-3 rounded-xl border border-purple-500/30">
-          <label className="block text-xs font-medium text-purple-300 mb-1">
-            Masukkan Jumlah Liter Air:
+        <div className="mb-4 bg-purple-950/30 p-3.5 rounded-2xl border border-purple-500/30 relative z-10">
+          <label className="block text-xs font-bold text-purple-300 mb-1.5 flex items-center justify-between">
+            <span>Masukkan Volume Air (Liter):</span>
+            <span className="text-purple-200 font-mono">{customLiter} L</span>
           </label>
           <input
             type="number"
@@ -160,22 +173,22 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
             max="100"
             value={customLiter}
             onChange={(e) => setCustomLiter(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+            className="w-full bg-slate-950 border border-purple-500/40 rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
           />
         </div>
       )}
 
       {/* Customer Name Input */}
-      <div className="mb-4">
-        <label className="block text-xs font-medium text-slate-400 mb-1.5">
-          Nama Pelanggan (Opsional)
+      <div className="mb-4 relative z-10">
+        <label className="block text-xs font-bold text-slate-400 mb-1.5">
+          Nama Pembeli (Opsional)
         </label>
         <input
           type="text"
           value={customerName}
           onChange={(e) => setCustomerName(e.target.value)}
           placeholder="Contoh: Budi Santoso"
-          className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 font-sans"
+          className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 font-sans shadow-inner"
         />
       </div>
 
@@ -183,52 +196,56 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
       <button
         onClick={handleCreateOrder}
         disabled={isCreating}
-        className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 active:scale-[0.99] text-white font-semibold rounded-xl text-sm shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+        className="w-full py-3 px-4 bg-gradient-to-r from-[#118EEA] via-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 active:scale-[0.99] text-white font-extrabold rounded-2xl text-xs sm:text-sm shadow-xl shadow-blue-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 relative z-10"
       >
         {isCreating ? (
           <Loader2 className="w-4 h-4 animate-spin" />
         ) : (
           <QrCode className="w-4 h-4" />
         )}
-        <span>Generate Order & QRIS DANA (Rp {getActivePrice().toLocaleString('id-ID')})</span>
+        <span>GENERATE QRIS DANA (Rp {getActivePrice().toLocaleString('id-ID')})</span>
       </button>
 
       {/* Active QR Code & Quick Pay Section */}
       {activePendingOrder && (
-        <div className="mt-5 p-4 rounded-xl bg-slate-900/80 border border-blue-500/30 flex flex-col items-center text-center">
-          <div className="flex items-center justify-between w-full mb-3">
-            <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-              QRIS DANA Siap Dibayar
+        <div className="mt-5 p-5 rounded-2xl bg-gradient-to-b from-slate-900 via-blue-950/50 to-slate-950 border border-cyan-500/40 flex flex-col items-center text-center shadow-2xl relative z-10 animate-fadeIn">
+          
+          <div className="flex items-center justify-between w-full mb-3.5">
+            <span className="text-xs font-black text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-yellow-400" /> SCAN QRIS DANA
             </span>
-            <span className="text-[11px] font-mono text-slate-400">
+            <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2.5 py-0.5 rounded-full border border-slate-800">
               {activePendingOrder.orderId}
             </span>
           </div>
 
-          <div className="bg-white p-3 rounded-2xl shadow-xl my-1">
+          {/* QR Code with Holographic Laser Scanner */}
+          <div className="relative p-4 bg-white rounded-3xl shadow-2xl overflow-hidden my-1.5">
+            <div className="laser-line" />
             <QRCodeSVG
               value={activePendingOrder.qrString || activePendingOrder.orderId}
-              size={130}
+              size={140}
               level="M"
               includeMargin={false}
             />
           </div>
 
-          <div className="mt-2 text-xs text-slate-400">
-            Scan dengan aplikasi DANA Sandbox atau klik tombol simulasi di bawah
+          <div className="text-xs text-slate-400 mt-2.5">
+            Scan dari aplikasi DANA Sandbox atau klik tombol simulasi di bawah:
           </div>
 
+          {/* 1-Click Instant Payment Button */}
           <button
             onClick={() => handleQuickPay(activePendingOrder.orderId)}
             disabled={isSimulating}
-            className="w-full mt-3 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold rounded-xl text-sm shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            className="w-full mt-3.5 py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
           >
             {isSimulating ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <Sparkles className="w-4 h-4 text-emerald-200" />
+              <Sparkles className="w-4 h-4 text-yellow-300" />
             )}
-            <span>⚡ Simulasi Pembayaran Sukses (Kirim Webhook)</span>
+            <span>⚡ SIMULASI BAYAR SUKSES (WEBHOOK DANA)</span>
           </button>
         </div>
       )}
