@@ -23,8 +23,8 @@ WiFiClientSecure secureClient;
 // ==========================================================
 // 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-String wifi_ssid     = "Jazz";       // Ganti dengan nama WiFi / Hotspot Anda
-String wifi_password = "PASSWORD_HOTSPOT_ANDA"; // Ganti dengan password Hotspot Anda
+String wifi_ssid     = "Jazz";       // SSID Hotspot HP
+String wifi_password = "12345678";   // Password Hotspot HP
 
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
@@ -94,7 +94,7 @@ void loadStoredWiFi() {
     String storedPASS = preferences.getString("pass", "");
     preferences.end();
 
-    if (storedSSID.length() > 0) {
+    if (storedSSID.length() > 0 && storedPASS.length() > 0) {
         wifi_ssid = storedSSID;
         wifi_password = storedPASS;
         Serial.print("📂 Membaca WiFi dari memori NVS ESP32: ");
@@ -120,23 +120,24 @@ void saveWiFiToNVS(String newSsid, String newPass) {
 // ==========================================================
 // 5. KONEKSI KE WIFI (Stabil & Anti-Hang)
 // ==========================================================
-bool connectToWiFi(int timeoutSeconds = 15) {
-    Serial.print("\n📡 Memulai koneksi ke WiFi: ");
+bool connectToWiFi(int timeoutSeconds = 20) {
+    Serial.println("\n-------------------------------------------------");
+    Serial.print("📡 Mencoba menghubungkan ke WiFi SSID: ");
     Serial.println(wifi_ssid);
+    Serial.print("🔑 Menggunakan Password: ");
+    Serial.println(wifi_password);
+    Serial.println("-------------------------------------------------");
 
-    WiFi.persistent(false);
     WiFi.disconnect(true);
-    delay(200);
+    delay(500);
 
     WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false); // Menonaktifkan sleep mode agar koneksi internet selalu stabil
-    delay(100);
-
+    WiFi.setSleep(false);
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
     unsigned long startAttemptTime = millis();
 
-    while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime < timeoutSeconds * 1000)) {
+    while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime < (unsigned long)timeoutSeconds * 1000)) {
         delay(500);
         Serial.print(".");
     }
@@ -151,8 +152,9 @@ bool connectToWiFi(int timeoutSeconds = 15) {
         isApMode = false;
         return true;
     } else {
-        Serial.println("\n❌ Gagal terhubung ke WiFi!");
-        Serial.print("Status Error Code: "); Serial.println(WiFi.status());
+        Serial.println("\n❌ Gagal terhubung ke WiFi dalam waktu " + String(timeoutSeconds) + " detik.");
+        Serial.print("⚠️ Status WiFi Code: "); Serial.println(WiFi.status());
+        Serial.println("💡 Tips: Pastikan Hotspot 'Jazz' dalam keadaan AKTIF dan jarak dekat dengan ESP32.");
         digitalWrite(BLUE_LED_PIN, LOW);
         return false;
     }
