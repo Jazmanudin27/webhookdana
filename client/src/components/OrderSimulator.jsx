@@ -1,24 +1,47 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { QrCode, Sparkles, CheckCircle, ArrowRight, ShoppingBag, Loader2, RefreshCw } from 'lucide-react';
+import { QrCode, Sparkles, CheckCircle, ShoppingBag, Loader2, RefreshCw, Droplet } from 'lucide-react';
 
-export default function OrderSimulator({ onOrderCreated, onSimulatePayment, activePendingOrder, loading }) {
-  const [packageType, setPackageType] = useState('1_GALON');
+export default function OrderSimulator({ onOrderCreated, onSimulatePayment, activePendingOrder }) {
+  const [packages, setPackages] = useState([]);
+  const [selectedPackageId, setSelectedPackageId] = useState(null);
   const [customLiter, setCustomLiter] = useState(19);
+  const [isCustom, setIsCustom] = useState(false);
   const [customerName, setCustomerName] = useState('Pelanggan Depot');
   const [isCreating, setIsCreating] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
 
-  const getPrice = () => {
-    if (packageType === '1_GALON') return 7000;
-    if (packageType === '2_GALON') return 14000;
-    return Math.round((Number(customLiter) / 19) * 7000);
+  const fetchPackages = async () => {
+    try {
+      const res = await fetch('/api/packages');
+      const data = await res.json();
+      if (data.success && data.data?.length > 0) {
+        setPackages(data.data);
+        if (!selectedPackageId) {
+          setSelectedPackageId(data.data[0].id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch packages:', e);
+    }
   };
 
-  const getLiters = () => {
-    if (packageType === '1_GALON') return 19;
-    if (packageType === '2_GALON') return 38;
-    return Number(customLiter) || 19;
+  useEffect(() => {
+    fetchPackages();
+  }, []);
+
+  const getActivePrice = () => {
+    if (isCustom) {
+      return Math.round((Number(customLiter) / 19) * 7000);
+    }
+    const pkg = packages.find(p => p.id === selectedPackageId);
+    return pkg ? pkg.price : 7000;
+  };
+
+  const getActiveLiters = () => {
+    if (isCustom) return Number(customLiter) || 19;
+    const pkg = packages.find(p => p.id === selectedPackageId);
+    return pkg ? pkg.liters : 19;
   };
 
   const handleCreateOrder = async (e) => {
@@ -29,8 +52,8 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          packageType,
-          customLiter: getLiters(),
+          packageId: isCustom ? null : selectedPackageId,
+          customLiter: isCustom ? getActiveLiters() : null,
           customerName: customerName || 'Pelanggan Depot'
         })
       });
@@ -71,48 +94,76 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
         </span>
       </div>
 
-      {/* Package Selection Cards */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        {/* Package 1 */}
-        <button
-          type="button"
-          onClick={() => { setPackageType('1_GALON'); }}
-          className={`p-3.5 rounded-xl border text-left transition-all relative ${
-            packageType === '1_GALON'
-              ? 'bg-blue-600/15 border-blue-500 ring-2 ring-blue-500/20 shadow-md'
-              : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          <div className="text-xs text-slate-400 font-medium">Paket Populer</div>
-          <div className="text-base font-bold text-white mt-0.5">1 Galon (19L)</div>
-          <div className="text-sm font-extrabold text-blue-400 font-mono mt-1">
-            Rp 7.000
-          </div>
-          {packageType === '1_GALON' && (
-            <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-blue-400" />
-          )}
-        </button>
+      {/* Dynamic Package Cards Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4">
+        {packages.map((pkg) => (
+          <button
+            key={pkg.id}
+            type="button"
+            onClick={() => {
+              setSelectedPackageId(pkg.id);
+              setIsCustom(false);
+            }}
+            className={`p-3 rounded-xl border text-left transition-all relative ${
+              !isCustom && selectedPackageId === pkg.id
+                ? 'bg-blue-600/15 border-blue-500 ring-2 ring-blue-500/20 shadow-md'
+                : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            {pkg.badge && (
+              <span className="inline-block text-[10px] font-semibold text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded mb-1">
+                {pkg.badge}
+              </span>
+            )}
+            <div className="text-xs font-bold text-white truncate">{pkg.name}</div>
+            <div className="text-[11px] text-cyan-300 font-mono mt-0.5">{pkg.liters} Liter</div>
+            <div className="text-xs font-extrabold text-emerald-400 font-mono mt-1">
+              Rp {pkg.price.toLocaleString('id-ID')}
+            </div>
+            {!isCustom && selectedPackageId === pkg.id && (
+              <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-blue-400" />
+            )}
+          </button>
+        ))}
 
-        {/* Package 2 */}
+        {/* Custom Liter Button */}
         <button
           type="button"
-          onClick={() => { setPackageType('2_GALON'); }}
-          className={`p-3.5 rounded-xl border text-left transition-all relative ${
-            packageType === '2_GALON'
-              ? 'bg-blue-600/15 border-blue-500 ring-2 ring-blue-500/20 shadow-md'
+          onClick={() => setIsCustom(true)}
+          className={`p-3 rounded-xl border text-left transition-all relative ${
+            isCustom
+              ? 'bg-purple-600/15 border-purple-500 ring-2 ring-purple-500/20 shadow-md'
               : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
           }`}
         >
-          <div className="text-xs text-slate-400 font-medium">Paket Hemat</div>
-          <div className="text-base font-bold text-white mt-0.5">2 Galon (38L)</div>
-          <div className="text-sm font-extrabold text-blue-400 font-mono mt-1">
-            Rp 14.000
+          <div className="text-[10px] text-purple-300 font-semibold mb-1">Kustom</div>
+          <div className="text-xs font-bold text-white">Liter Bebas</div>
+          <div className="text-xs font-extrabold text-purple-400 font-mono mt-2">
+            Rp {getActivePrice().toLocaleString('id-ID')}
           </div>
-          {packageType === '2_GALON' && (
-            <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-blue-400" />
+          {isCustom && (
+            <div className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-purple-400" />
           )}
         </button>
       </div>
+
+      {/* Input if custom */}
+      {isCustom && (
+        <div className="mb-4 bg-slate-900/80 p-3 rounded-xl border border-purple-500/30">
+          <label className="block text-xs font-medium text-purple-300 mb-1">
+            Masukkan Jumlah Liter Air:
+          </label>
+          <input
+            type="number"
+            step="0.5"
+            min="1"
+            max="100"
+            value={customLiter}
+            onChange={(e) => setCustomLiter(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+          />
+        </div>
+      )}
 
       {/* Customer Name Input */}
       <div className="mb-4">
@@ -124,7 +175,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
           value={customerName}
           onChange={(e) => setCustomerName(e.target.value)}
           placeholder="Contoh: Budi Santoso"
-          className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 font-sans"
         />
       </div>
 
@@ -139,12 +190,12 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
         ) : (
           <QrCode className="w-4 h-4" />
         )}
-        <span>Generate Order & QRIS DANA (Rp {getPrice().toLocaleString('id-ID')})</span>
+        <span>Generate Order & QRIS DANA (Rp {getActivePrice().toLocaleString('id-ID')})</span>
       </button>
 
       {/* Active QR Code & Quick Pay Section */}
       {activePendingOrder && (
-        <div className="mt-5 p-4 rounded-xl bg-slate-900/80 border border-blue-500/30 flex flex-col items-center text-center animate-fadeIn">
+        <div className="mt-5 p-4 rounded-xl bg-slate-900/80 border border-blue-500/30 flex flex-col items-center text-center">
           <div className="flex items-center justify-between w-full mb-3">
             <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
               QRIS DANA Siap Dibayar
@@ -167,7 +218,6 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
             Scan dengan aplikasi DANA Sandbox atau klik tombol simulasi di bawah
           </div>
 
-          {/* 1-Click Sandbox Payment Trigger Button */}
           <button
             onClick={() => handleQuickPay(activePendingOrder.orderId)}
             disabled={isSimulating}

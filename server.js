@@ -4,15 +4,16 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
-const fs = require('fs');
 require('dotenv').config();
+
+const db = require('./db');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST', 'PUT', 'DELETE']
   }
 });
 
@@ -25,81 +26,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
-// Ensure data directory exists
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-const TRANSACTIONS_FILE = path.join(DATA_DIR, 'transactions.json');
-const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
-const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-
-// Load stored data or initialize
-let transactions = [];
-let auditLogs = [];
-let deviceSettings = {
-  wifiSsid: 'WiFi_Depot_Air',
-  wifiPassword: '',
-  pulsesPerLiter: 450,
-  pendingWifiUpdate: null // { ssid, password, timestamp }
-};
-
-try {
-  if (fs.existsSync(TRANSACTIONS_FILE)) {
-    transactions = JSON.parse(fs.readFileSync(TRANSACTIONS_FILE, 'utf8'));
-  }
-} catch (e) {
-  transactions = [];
-}
-
-try {
-  if (fs.existsSync(LOGS_FILE)) {
-    auditLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
-  }
-} catch (e) {
-  auditLogs = [];
-}
-
-try {
-  if (fs.existsSync(SETTINGS_FILE)) {
-    deviceSettings = { ...deviceSettings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
-  }
-} catch (e) {
-  console.error('Error reading settings.json:', e.message);
-}
-
-function saveTransactions() {
-  try {
-    fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(transactions.slice(-200), null, 2));
-  } catch (e) {}
-}
-
-function saveSettings() {
-  try {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(deviceSettings, null, 2));
-  } catch (e) {}
-}
-
-function addLog(source, type, message, payload = null) {
-  const logItem = {
-    id: 'LOG-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
-    timestamp: new Date().toISOString(),
-    source, // 'DANA_WEBHOOK', 'ESP32', 'SYSTEM', 'DASHBOARD'
-    type,   // 'INFO', 'SUCCESS', 'WARNING', 'ERROR'
-    message,
-    payload
-  };
-  auditLogs.unshift(logItem);
-  if (auditLogs.length > 300) auditLogs.pop();
-  try {
-    fs.writeFileSync(LOGS_FILE, JSON.stringify(auditLogs.slice(0, 300), null, 2));
-  } catch (e) {}
-
-  io.emit('log:new', logItem);
-  return logItem;
-}
-
 // System State
 let currentState = {
   status: 'IDLE', // 'IDLE' | 'PAID' | 'FILLING' | 'EMERGENCY_STOP'
@@ -109,27 +35,26 @@ let currentState = {
   esp32Status: 'OFFLINE',
   esp32CurrentSsid: null,
   totalWaterDispensedToday: 0,
-  totalRevenueToday: 0
+  totalRevenueToday: 0,
+  isMySql: false
 };
 
-// Calculate initial today stats
-function updateTodayStats() {
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayTx = transactions.filter(t => t.createdAt && t.createdAt.startsWith(todayStr) && t.status === 'COMPLETED');
-  currentState.totalWaterDispensedToday = todayTx.reduce((acc, curr) => acc + (Number(curr.dispensedLiter) || Number(curr.targetLiter) || 0), 0);
-  currentState.totalRevenueToday = todayTx.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+async function refreshStats() {
+  const stats = await db.getTodayStats();
+  currentState.totalRevenueToday = stats.totalRevenueToday;
+  currentState.totalWaterDispensedToday = stats.totalWaterDispensedToday;
+  currentState.isMySql = db.isMySqlConnected();
 }
-updateTodayStats();
 
 // ESP32 Heartbeat Monitor
 setInterval(() => {
   if (currentState.esp32LastSeen) {
     const elapsed = Date.now() - new Date(currentState.esp32LastSeen).getTime();
     const wasOnline = currentState.esp32Status === 'ONLINE';
-    if (elapsed > 10000) { // 10s timeout
+    if (elapsed > 10000) {
       currentState.esp32Status = 'OFFLINE';
       if (wasOnline) {
-        addLog('ESP32', 'WARNING', 'ESP32 Device Terputus (Heartbeat Timeout)');
+        db.addLog('ESP32', 'WARNING', 'ESP32 Device Terputus (Heartbeat Timeout)');
         io.emit('system:state', currentState);
       }
     } else {
@@ -142,19 +67,23 @@ setInterval(() => {
 // 1. DANA SANDBOX WEBHOOK & ORDER ENDPOINTS
 // ==========================================
 
-app.post('/api/dana/create-order', (req, res) => {
+app.post('/api/dana/create-order', async (req, res) => {
   try {
-    const { packageType, customLiter, customerName } = req.body;
+    const { packageId, customLiter, customerName } = req.body;
     
     let targetLiter = 19;
     let amount = 7000;
     let title = 'Isi Ulang 1 Galon (19L)';
 
-    if (packageType === '2_GALON' || customLiter === 38) {
-      targetLiter = 38;
-      amount = 14000;
-      title = 'Isi Ulang 2 Galon (38L)';
-    } else if (packageType === 'CUSTOM' && customLiter > 0) {
+    if (packageId) {
+      const packages = await db.getPackages();
+      const selected = packages.find(p => p.id === Number(packageId));
+      if (selected) {
+        targetLiter = selected.liters;
+        amount = selected.price;
+        title = `Isi Ulang ${selected.name}`;
+      }
+    } else if (customLiter > 0) {
       targetLiter = Number(customLiter);
       amount = Math.round((targetLiter / 19) * 7000);
       title = `Isi Ulang Custom (${targetLiter}L)`;
@@ -178,10 +107,10 @@ app.post('/api/dana/create-order', (req, res) => {
       checkoutUrl: `${PUBLIC_BASE_URL}/checkout/${orderId}`
     };
 
-    transactions.unshift(newOrder);
-    saveTransactions();
+    await db.saveTransaction(newOrder);
 
-    addLog('DASHBOARD', 'INFO', `Order baru dibuat: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
+    const logItem = await db.addLog('DASHBOARD', 'INFO', `Order baru dibuat: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
+    io.emit('log:new', logItem);
     io.emit('order:created', newOrder);
 
     return res.status(201).json({
@@ -194,7 +123,7 @@ app.post('/api/dana/create-order', (req, res) => {
   }
 });
 
-app.post('/api/dana/finish-notify', (req, res) => {
+app.post('/api/dana/finish-notify', async (req, res) => {
   try {
     const rawBody = req.body;
     let merchantTransId = null;
@@ -212,9 +141,10 @@ app.post('/api/dana/finish-notify', (req, res) => {
       amountVal = rawBody.amount || rawBody.totalAmount;
     }
 
-    addLog('DANA_WEBHOOK', 'SUCCESS', `Webhook Finish-Notify diterima untuk Order: ${merchantTransId || 'Unknown'}`, rawBody);
+    const logItem = await db.addLog('DANA_WEBHOOK', 'SUCCESS', `Webhook Finish-Notify diterima untuk Order: ${merchantTransId || 'Unknown'}`, rawBody);
+    io.emit('log:new', logItem);
 
-    let order = transactions.find(t => t.orderId === merchantTransId || t.merchantTransId === merchantTransId);
+    let order = await db.findTransaction(merchantTransId);
 
     if (!order) {
       const liter = amountVal >= 14000 ? 38 : 19;
@@ -233,15 +163,16 @@ app.post('/api/dana/finish-notify', (req, res) => {
         dispensedLiter: 0,
         acquirementId
       };
-      transactions.unshift(order);
+      await db.saveTransaction(order);
     } else {
+      await db.updateTransaction(merchantTransId, {
+        status: 'PAID',
+        paidAt: new Date().toISOString(),
+        acquirementId: acquirementId
+      });
       order.status = 'PAID';
       order.paidAt = new Date().toISOString();
-      order.acquirementId = acquirementId;
-      if (amountVal) order.amount = Number(amountVal);
     }
-
-    saveTransactions();
 
     currentState.status = 'PAID';
     currentState.activeOrder = {
@@ -256,7 +187,8 @@ app.post('/api/dana/finish-notify', (req, res) => {
     io.emit('order:paid', order);
     io.emit('system:state', currentState);
 
-    addLog('SYSTEM', 'SUCCESS', `Pembayaran DANA Dikonfirmasi! Mengantrikan Dispenser ESP32: ${order.targetLiter} Liter`, currentState.activeOrder);
+    const logSys = await db.addLog('SYSTEM', 'SUCCESS', `Pembayaran DANA Dikonfirmasi! Mengantrikan Dispenser ESP32: ${order.targetLiter} Liter`, currentState.activeOrder);
+    io.emit('log:new', logSys);
 
     return res.status(200).json({
       response: {
@@ -271,7 +203,7 @@ app.post('/api/dana/finish-notify', (req, res) => {
             resultCode: 'SUCCESS',
             resultMsg: 'Success'
           },
-          merchantTransId: order.merchantTransId,
+          merchantTransId: order.merchantTransId || order.orderId,
           acquirementId: acquirementId || 'DANA-SANDBOX-SUCCESS'
         }
       }
@@ -283,9 +215,9 @@ app.post('/api/dana/finish-notify', (req, res) => {
   }
 });
 
-app.post('/api/dana/simulate-pay', (req, res) => {
+app.post('/api/dana/simulate-pay', async (req, res) => {
   const { orderId } = req.body;
-  let targetOrder = transactions.find(t => t.orderId === orderId);
+  let targetOrder = await db.findTransaction(orderId);
 
   if (!targetOrder) {
     const newOrderId = 'DANA-SIM-' + Date.now();
@@ -300,12 +232,15 @@ app.post('/api/dana/simulate-pay', (req, res) => {
       status: 'PENDING',
       createdAt: new Date().toISOString()
     };
-    transactions.unshift(targetOrder);
+    await db.saveTransaction(targetOrder);
   }
 
+  await db.updateTransaction(targetOrder.orderId, {
+    status: 'PAID',
+    paidAt: new Date().toISOString()
+  });
   targetOrder.status = 'PAID';
   targetOrder.paidAt = new Date().toISOString();
-  saveTransactions();
 
   currentState.status = 'PAID';
   currentState.activeOrder = {
@@ -317,8 +252,8 @@ app.post('/api/dana/simulate-pay', (req, res) => {
     paidAt: targetOrder.paidAt
   };
 
-  addLog('DANA_WEBHOOK', 'SUCCESS', `[SIMULASI] Pembayaran Sukses DANA Sandbox untuk Order: ${targetOrder.orderId}`, targetOrder);
-
+  const logItem = await db.addLog('DANA_WEBHOOK', 'SUCCESS', `[SIMULASI] Pembayaran Sukses DANA Sandbox untuk Order: ${targetOrder.orderId}`, targetOrder);
+  io.emit('log:new', logItem);
   io.emit('order:paid', targetOrder);
   io.emit('system:state', currentState);
 
@@ -333,11 +268,7 @@ app.post('/api/dana/simulate-pay', (req, res) => {
 // 2. ESP32 POLLING & WIFI SETTINGS API
 // ==========================================
 
-/**
- * Endpoint: /api/esp32/check-order
- * ESP32 polling setiap 2 detik. Jika ada instruksi ganti WiFi, server mengembalikan command UPDATE_WIFI
- */
-app.get('/api/esp32/check-order', (req, res) => {
+app.get('/api/esp32/check-order', async (req, res) => {
   currentState.esp32LastSeen = new Date().toISOString();
   currentState.esp32Ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'ESP32-Client';
   currentState.esp32Status = 'ONLINE';
@@ -346,22 +277,22 @@ app.get('/api/esp32/check-order', (req, res) => {
     currentState.esp32CurrentSsid = req.query.ssid;
   }
 
-  // 1. Cek apakah ada antrean instruksi Ganti WiFi dari Dashboard
-  if (deviceSettings.pendingWifiUpdate) {
+  // 1. Cek Instruksi Ganti WiFi
+  const pendingWifi = await db.getSetting('pending_wifi_update');
+  if (pendingWifi && pendingWifi.ssid) {
     const updatePayload = {
       status: 'UPDATE_WIFI',
-      wifiSsid: deviceSettings.pendingWifiUpdate.ssid,
-      wifiPassword: deviceSettings.pendingWifiUpdate.password,
+      wifiSsid: pendingWifi.ssid,
+      wifiPassword: pendingWifi.password || '',
       serverTime: Date.now()
     };
-    // Hapus pending setelah dikirim ke ESP32
-    deviceSettings.pendingWifiUpdate = null;
-    saveSettings();
-    addLog('SYSTEM', 'INFO', `Instruksi ganti WiFi terkirim ke ESP32 -> SSID: ${updatePayload.wifiSsid}`);
+    await db.setSetting('pending_wifi_update', null);
+    const logItem = await db.addLog('SYSTEM', 'INFO', `Instruksi ganti WiFi terkirim ke ESP32 -> SSID: ${updatePayload.wifiSsid}`);
+    io.emit('log:new', logItem);
     return res.status(200).json(updatePayload);
   }
 
-  // 2. Cek apakah ada antrean order PAID
+  // 2. Cek Order PAID
   if (currentState.status === 'PAID' && currentState.activeOrder) {
     return res.status(200).json({
       status: 'PAID',
@@ -373,7 +304,7 @@ app.get('/api/esp32/check-order', (req, res) => {
     });
   }
 
-  // 3. Status Standby / IDLE
+  // 3. Standby / IDLE
   return res.status(200).json({
     status: currentState.status === 'FILLING' ? 'FILLING' : 'IDLE',
     orderId: currentState.activeOrder ? currentState.activeOrder.orderId : null,
@@ -382,30 +313,28 @@ app.get('/api/esp32/check-order', (req, res) => {
   });
 });
 
-app.post('/api/esp32/finish-fill', (req, res) => {
+app.post('/api/esp32/finish-fill', async (req, res) => {
   try {
     const { orderId, dispensedLiter, durationSeconds, status: fillStatus } = req.body;
     const actualLiter = Number(dispensedLiter) || 0;
     const isEmergency = fillStatus === 'EMERGENCY_STOP';
 
-    const order = transactions.find(t => t.orderId === orderId);
-    if (order) {
-      order.status = isEmergency ? 'STOPPED' : 'COMPLETED';
-      order.dispensedLiter = actualLiter;
-      order.durationSeconds = durationSeconds || 0;
-      order.completedAt = new Date().toISOString();
-      saveTransactions();
-    }
+    await db.updateTransaction(orderId, {
+      status: isEmergency ? 'STOPPED' : 'COMPLETED',
+      dispensedLiter: actualLiter,
+      durationSeconds: durationSeconds || 0,
+      completedAt: new Date().toISOString()
+    });
 
-    if (isEmergency) {
-      addLog('ESP32', 'WARNING', `Pengisian dihentikan darurat: ${orderId} (${actualLiter}L)`, req.body);
-    } else {
-      addLog('ESP32', 'SUCCESS', `Pengisian Air Selesai: ${orderId} (${actualLiter}L)`, req.body);
-    }
+    const logMsg = isEmergency 
+      ? `Pengisian dihentikan darurat: ${orderId} (${actualLiter}L)`
+      : `Pengisian Air Selesai: ${orderId} (${actualLiter}L)`;
+    const logItem = await db.addLog('ESP32', isEmergency ? 'WARNING' : 'SUCCESS', logMsg, req.body);
+    io.emit('log:new', logItem);
 
     currentState.status = 'IDLE';
     currentState.activeOrder = null;
-    updateTodayStats();
+    await refreshStats();
 
     io.emit('order:completed', {
       orderId,
@@ -436,72 +365,118 @@ app.post('/api/esp32/telemetry', (req, res) => {
   return res.json({ ok: true });
 });
 
-// Endpoint untuk Dashboard mengubah konfigurasi WiFi ESP32
-app.post('/api/device/save-wifi', (req, res) => {
+// WiFi Settings Endpoint
+app.post('/api/device/save-wifi', async (req, res) => {
   const { ssid, password } = req.body;
-  if (!ssid) {
-    return res.status(400).json({ success: false, message: 'Nama WiFi (SSID) tidak boleh kosong!' });
+  if (!ssid) return res.status(400).json({ success: false, message: 'Nama WiFi (SSID) tidak boleh kosong!' });
+
+  await db.setSetting('wifi_ssid', ssid);
+  await db.setSetting('wifi_password', password || '');
+  await db.setSetting('pending_wifi_update', { ssid, password: password || '', updatedAt: new Date().toISOString() });
+
+  const logItem = await db.addLog('DASHBOARD', 'SUCCESS', `Pengaturan WiFi baru disimpan di Web: SSID "${ssid}". Perintah update dijadwalkan ke ESP32.`);
+  io.emit('log:new', logItem);
+
+  return res.json({
+    success: true,
+    message: `Pengaturan WiFi untuk "${ssid}" berhasil disimpan. ESP32 akan otomatis berganti ke WiFi baru pada polling berikutnya!`
+  });
+});
+
+app.get('/api/device/settings', async (req, res) => {
+  const wifiSsid = await db.getSetting('wifi_ssid', 'WiFi_Depot_Air');
+  const pendingUpdate = await db.getSetting('pending_wifi_update');
+
+  return res.json({
+    success: true,
+    data: {
+      wifiSsid,
+      hasPendingUpdate: Boolean(pendingUpdate),
+      esp32CurrentSsid: currentState.esp32CurrentSsid,
+      databaseType: db.isMySqlConnected() ? 'MySQL / MariaDB' : 'JSON Flat File (data/)'
+    }
+  });
+});
+
+// ==========================================
+// 3. PAKET AIR (HARGA & LITERAN CRUD API)
+// ==========================================
+
+app.get('/api/packages', async (req, res) => {
+  const packages = await db.getPackages();
+  return res.json({ success: true, data: packages });
+});
+
+app.get('/api/admin/packages', async (req, res) => {
+  const packages = await db.getAllPackagesAdmin();
+  return res.json({ success: true, data: packages });
+});
+
+app.post('/api/admin/packages', async (req, res) => {
+  try {
+    const { id, name, liters, price, badge, isActive } = req.body;
+    if (!name || !liters || !price) {
+      return res.status(400).json({ success: false, message: 'Nama paket, liter, dan harga wajib diisi!' });
+    }
+
+    const saved = await db.savePackage({
+      id: id ? Number(id) : undefined,
+      name,
+      liters: Number(liters),
+      price: Number(price),
+      badge: badge || '',
+      isActive: isActive !== false
+    });
+
+    const logItem = await db.addLog('DASHBOARD', 'INFO', `Paket Air ${id ? 'diperbarui' : 'ditambahkan'}: ${name} (${liters}L - Rp ${Number(price).toLocaleString('id-ID')})`);
+    io.emit('log:new', logItem);
+    io.emit('packages:updated');
+
+    return res.json({ success: true, message: 'Paket berhasil disimpan', data: saved });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: e.message });
   }
-
-  deviceSettings.wifiSsid = ssid;
-  deviceSettings.wifiPassword = password || '';
-  deviceSettings.pendingWifiUpdate = {
-    ssid,
-    password: password || '',
-    updatedAt: new Date().toISOString()
-  };
-  saveSettings();
-
-  addLog('DASHBOARD', 'SUCCESS', `Pengaturan WiFi baru disimpan di Web: SSID "${ssid}". Perintah update dijadwalkan ke ESP32.`);
-
-  return res.json({
-    success: true,
-    message: `Pengaturan WiFi untuk "${ssid}" berhasil disimpan. ESP32 akan otomatis berganti ke WiFi baru pada polling berikutnya!`,
-    data: {
-      ssid: deviceSettings.wifiSsid,
-      hasPassword: Boolean(deviceSettings.wifiPassword)
-    }
-  });
 });
 
-app.get('/api/device/settings', (req, res) => {
-  return res.json({
-    success: true,
-    data: {
-      wifiSsid: deviceSettings.wifiSsid,
-      hasPassword: Boolean(deviceSettings.wifiPassword),
-      pendingWifiUpdate: Boolean(deviceSettings.pendingWifiUpdate),
-      esp32CurrentSsid: currentState.esp32CurrentSsid
-    }
-  });
+app.delete('/api/admin/packages/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.deletePackage(Number(id));
+    const logItem = await db.addLog('DASHBOARD', 'WARNING', `Paket Air ID ${id} dihapus dari daftar`);
+    io.emit('log:new', logItem);
+    io.emit('packages:updated');
+    return res.json({ success: true, message: 'Paket berhasil dihapus' });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: e.message });
+  }
 });
 
-app.post('/api/depot/emergency-stop', (req, res) => {
+// ==========================================
+// 4. STATS & MONITORING API
+// ==========================================
+
+app.post('/api/depot/emergency-stop', async (req, res) => {
   const previousOrder = currentState.activeOrder;
   currentState.status = 'IDLE';
   currentState.activeOrder = null;
 
   if (previousOrder) {
-    const order = transactions.find(t => t.orderId === previousOrder.orderId);
-    if (order) {
-      order.status = 'STOPPED';
-      order.completedAt = new Date().toISOString();
-      saveTransactions();
-    }
+    await db.updateTransaction(previousOrder.orderId, {
+      status: 'STOPPED',
+      completedAt: new Date().toISOString()
+    });
   }
 
-  addLog('DASHBOARD', 'WARNING', 'Emergency Stop diaktifkan manual dari Dashboard!');
+  const logItem = await db.addLog('DASHBOARD', 'WARNING', 'Emergency Stop diaktifkan manual dari Dashboard!');
+  io.emit('log:new', logItem);
   io.emit('system:state', currentState);
 
   return res.json({ success: true, message: 'Emergency Stop dieksekusi' });
 });
 
-// ==========================================
-// 3. STATS & STATIC ASSETS
-// ==========================================
-
-app.get('/api/status', (req, res) => {
-  updateTodayStats();
+app.get('/api/status', async (req, res) => {
+  await refreshStats();
+  const configuredSsid = await db.getSetting('wifi_ssid', 'WiFi_Depot_Air');
   return res.json({
     success: true,
     data: {
@@ -511,17 +486,20 @@ app.get('/api/status', (req, res) => {
       webhookEndpoint: `${PUBLIC_BASE_URL}/api/dana/finish-notify`,
       esp32CheckEndpoint: `${PUBLIC_BASE_URL}/api/esp32/check-order`,
       esp32FinishEndpoint: `${PUBLIC_BASE_URL}/api/esp32/finish-fill`,
-      configuredWifiSsid: deviceSettings.wifiSsid
+      configuredWifiSsid: configuredSsid,
+      databaseType: db.isMySqlConnected() ? 'MySQL (Live Connected)' : 'JSON Database'
     }
   });
 });
 
-app.get('/api/transactions', (req, res) => {
-  return res.json({ success: true, total: transactions.length, data: transactions });
+app.get('/api/transactions', async (req, res) => {
+  const tx = await db.getTransactions(100);
+  return res.json({ success: true, total: tx.length, data: tx });
 });
 
-app.get('/api/logs', (req, res) => {
-  return res.json({ success: true, total: auditLogs.length, data: auditLogs });
+app.get('/api/logs', async (req, res) => {
+  const logs = await db.getLogs(100);
+  return res.json({ success: true, total: logs.length, data: logs });
 });
 
 const clientDistPath = path.join(__dirname, 'client', 'dist');
@@ -535,16 +513,26 @@ if (fs.existsSync(clientDistPath)) {
   app.use(express.static(path.join(__dirname, 'public')));
 }
 
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
+  await refreshStats();
   socket.emit('system:state', currentState);
+  const tx = await db.getTransactions(50);
+  const logs = await db.getLogs(50);
   socket.emit('init:data', {
-    transactions: transactions.slice(0, 50),
-    logs: auditLogs.slice(0, 50),
+    transactions: tx,
+    logs: logs,
     state: currentState
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server aktif di port ${PORT} | Base URL: ${PUBLIC_BASE_URL}`);
-  addLog('SYSTEM', 'INFO', `Server backend berhasil berjalan pada port ${PORT}`);
-});
+// Boot Server
+async function start() {
+  await db.initDB();
+  await refreshStats();
+  server.listen(PORT, () => {
+    console.log(`🚀 Server aktif di port ${PORT} | Base URL: ${PUBLIC_BASE_URL}`);
+    console.log(`🗄️ Database: ${db.isMySqlConnected() ? 'MySQL Connected' : 'JSON Storage'}`);
+  });
+}
+
+start();

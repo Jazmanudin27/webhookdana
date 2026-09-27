@@ -1,6 +1,6 @@
 {
   "name": "webhook-dana-depot-air",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Sistem Depot Air Isi Ulang Otomatis Terintegrasi Webhook DANA Sandbox & ESP32",
   "main": "server.js",
   "scripts": {
@@ -18,7 +18,7 @@
     "iot",
     "water-refill",
     "depot-air",
-    "qris"
+    "mysql"
   ],
   "author": "AsparTech",
   "license": "MIT",
@@ -28,6 +28,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "morgan": "^1.10.0",
+    "mysql2": "^3.24.4",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

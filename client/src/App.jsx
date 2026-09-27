@@ -24,6 +24,7 @@ import WebhookInspector from './components/WebhookInspector';
 import TransactionHistory from './components/TransactionHistory';
 import HardwareConfigGuide from './components/HardwareConfigGuide';
 import WifiSettingsCard from './components/WifiSettingsCard';
+import PackageManagerCard from './components/PackageManagerCard';
 
 export default function App() {
   const [socket, setSocket] = useState(null);
@@ -277,6 +278,7 @@ export default function App() {
         <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
           {[
             { id: 'dashboard', label: 'Monitor & Kiosk', icon: Droplet },
+            { id: 'packages', label: 'Kelola Paket Air & Harga', icon: Layers },
             { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi },
             { id: 'inspector', label: 'Webhook & ESP32 Live Log', icon: Terminal },
             { id: 'transactions', label: 'Riwayat Transaksi', icon: History },
@@ -321,7 +323,12 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: WiFi Settings */}
+        {/* Tab 2: Package & Price Manager */}
+        {activeTab === 'packages' && (
+          <PackageManagerCard onPackagesChanged={() => {}} />
+        )}
+
+        {/* Tab 3: WiFi Settings */}
         {activeTab === 'wifi' && (
           <WifiSettingsCard systemState={systemState} />
         )}
