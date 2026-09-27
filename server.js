@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const db = require('./db');
