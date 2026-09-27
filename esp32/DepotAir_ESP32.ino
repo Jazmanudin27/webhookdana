@@ -26,7 +26,7 @@ WiFiClientSecure secureClient;
 // 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
 String wifi_ssid     = "TP-Link_71E8"; // SSID Router TP-Link
-String wifi_password = "12345678";     // Password WiFi
+String wifi_password = "11450979";     // Password WiFi
 
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
@@ -97,7 +97,7 @@ void loadStoredWiFi() {
     String storedSSID = preferences.getString("ssid", "");
     String storedPASS = preferences.getString("pass", "");
 
-    if (storedSSID.length() > 0 && storedPASS.length() > 0 && storedSSID != "Jazz") {
+    if (storedSSID.length() > 0 && storedPASS.length() > 0 && storedPASS != "12345678" && storedSSID != "Jazz") {
         wifi_ssid = storedSSID;
         wifi_password = storedPASS;
         Serial.print("📂 Membaca WiFi dari memori NVS ESP32: ");
