@@ -18,13 +18,13 @@
 #include <WebServer.h>
 
 Preferences preferences;
-WiFiClientSecure secureClient; // Client SSL Aman untuk HTTPS
+WiFiClientSecure secureClient;
 
 // ==========================================================
 // 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-String wifi_ssid     = "Jazz"; // Nama WiFi Anda
-String wifi_password = "12345678";     // Password WiFi Anda
+String wifi_ssid     = "Jazz";       // Ganti dengan nama WiFi / Hotspot Anda
+String wifi_password = "PASSWORD_HOTSPOT_ANDA"; // Ganti dengan password Hotspot Anda
 
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
@@ -33,7 +33,7 @@ String urlCheckOrder = String(BASE_SERVER_URL) + "/api/esp32/check-order";
 String urlFinishFill = String(BASE_SERVER_URL) + "/api/esp32/finish-fill";
 String urlTelemetry  = String(BASE_SERVER_URL) + "/api/esp32/telemetry";
 
-// Hotspot Darurat jika WiFi rumah mati / belum tersetting
+// Hotspot Darurat jika WiFi gagal connect
 const char* AP_SSID = "ESP32_Depot_Air";
 const char* AP_PASS = "12345678";
 WebServer apServer(80);
@@ -97,10 +97,10 @@ void loadStoredWiFi() {
     if (storedSSID.length() > 0) {
         wifi_ssid = storedSSID;
         wifi_password = storedPASS;
-        Serial.print("📂 Membaca WiFi dari memori ESP32: ");
+        Serial.print("📂 Membaca WiFi dari memori NVS ESP32: ");
         Serial.println(wifi_ssid);
     } else {
-        Serial.println("ℹ️ Memakai default WiFi: " + wifi_ssid);
+        Serial.println("ℹ️ Memakai konfigurasi default: " + wifi_ssid);
     }
 }
 
@@ -118,50 +118,59 @@ void saveWiFiToNVS(String newSsid, String newPass) {
 }
 
 // ==========================================================
-// 5. KONEKSI KE WIFI
+// 5. KONEKSI KE WIFI (Stabil & Anti-Hang)
 // ==========================================================
 bool connectToWiFi(int timeoutSeconds = 15) {
-    Serial.print("\n📡 Menghubungkan ke WiFi: ");
+    Serial.print("\n📡 Memulai koneksi ke WiFi: ");
     Serial.println(wifi_ssid);
 
-    WiFi.disconnect();
+    WiFi.persistent(false);
+    WiFi.disconnect(true);
+    delay(200);
+
     WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false); // Menonaktifkan sleep mode agar koneksi internet selalu stabil
+    delay(100);
+
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
-    int count = 0;
-    while (WiFi.status() != WL_CONNECTED && count < (timeoutSeconds * 2)) {
+    unsigned long startAttemptTime = millis();
+
+    while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime < timeoutSeconds * 1000)) {
         delay(500);
         Serial.print(".");
-        digitalWrite(BLUE_LED_PIN, !digitalRead(BLUE_LED_PIN));
-        count++;
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n✅ WiFi Terhubung Sukses!");
-        Serial.print("📍 IP ESP32: "); Serial.println(WiFi.localIP());
+        Serial.println("\n🎉 ✅ WiFi Terhubung Sukses!");
+        Serial.print("📍 IP Address ESP32: "); Serial.println(WiFi.localIP());
+        Serial.print("📶 Sinyal RSSI: "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
+        
         digitalWrite(BLUE_LED_PIN, HIGH);
         triggerBuzzer(2, 80, 80);
         isApMode = false;
         return true;
     } else {
-        Serial.println("\n❌ Gagal terhubung ke WiFi! Cek nama WiFi / Password.");
+        Serial.println("\n❌ Gagal terhubung ke WiFi!");
+        Serial.print("Status Error Code: "); Serial.println(WiFi.status());
         digitalWrite(BLUE_LED_PIN, LOW);
         return false;
     }
 }
 
 // ==========================================================
-// 6. HOTSPOT DARURAT / CAPTIVE PORTAL (Jika WiFi Gagal Konek)
+// 6. HOTSPOT DARURAT / CAPTIVE PORTAL
 // ==========================================================
 void startEmergencyAP() {
     isApMode = true;
+    WiFi.disconnect();
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASS);
 
     Serial.println("\n⚠️ [MODE DARURAT] Membuka Hotspot Konfigurasi WiFi:");
-    Serial.print("SSID: "); Serial.println(AP_SSID);
-    Serial.print("Password: "); Serial.println(AP_PASS);
-    Serial.print("Buka browser di HP/Laptop ke: http://"); Serial.println(WiFi.softAPIP());
+    Serial.print("SSID Hotspot: "); Serial.println(AP_SSID);
+    Serial.print("Password    : "); Serial.println(AP_PASS);
+    Serial.print("Buka browser di HP ke: http://"); Serial.println(WiFi.softAPIP());
 
     apServer.on("/", []() {
         String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>Pengaturan WiFi Depot Air</title>"
@@ -169,7 +178,7 @@ void startEmergencyAP() {
                       ".card{background:#1e293b;padding:24px;border-radius:16px;max-width:350px;margin:auto;}"
                       "input{width:100%;padding:10px;margin:10px 0;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;box-sizing:border-box;}"
                       "button{background:#0284c7;color:#fff;border:none;padding:12px;width:100%;border-radius:8px;font-weight:bold;cursor:pointer;}</style></head>"
-                      "<body><div class='card'><h2>Pengaturan WiFi ESP32</h2><p style='font-size:13px;color:#94a3b8;'>Masukkan WiFi Rumah / Depot Anda:</p>"
+                      "<body><div class='card'><h2>Pengaturan WiFi ESP32</h2><p style='font-size:13px;color:#94a3b8;'>Masukkan WiFi Rumah / Hotspot HP:</p>"
                       "<form action='/save' method='POST'>"
                       "<input type='text' name='ssid' placeholder='Nama WiFi (SSID)' required>"
                       "<input type='password' name='pass' placeholder='Password WiFi'>"
@@ -184,9 +193,9 @@ void startEmergencyAP() {
             saveWiFiToNVS(s, p);
 
             String resp = "<html><body style='background:#0f172a;color:#fff;text-align:center;padding:40px;font-family:sans-serif;'>"
-                          "<h2>✅ Tersimpan!</h2><p>ESP32 sedang mencoba menyambung ke " + s + "...</p></body></html>";
+                          "<h2>✅ Tersimpan!</h2><p>ESP32 sedang me-restart untuk konek ke " + s + "...</p></body></html>";
             apServer.send(200, "text/html", resp);
-            delay(2000);
+            delay(1500);
             ESP.restart();
         }
     });
@@ -195,7 +204,7 @@ void startEmergencyAP() {
 }
 
 // ==========================================================
-// 7. PROSES TRANSAKSI & KONTROL PENGISIAN AIR
+// 7. KONTROL TRANSAKSI & PENGISIAN AIR
 // ==========================================================
 void startFilling(String orderId, float targetLiters) {
     currentOrderId = orderId;
@@ -276,7 +285,7 @@ void stopFilling(bool isFinishedSuccess = true) {
 }
 
 // ==========================================================
-// 8. POLLING CLOUD DANA & MENERIMA UPDATE WIFI DARI WEB
+// 8. POLLING CLOUD SERVER
 // ==========================================================
 void checkOrderFromServer() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -288,7 +297,6 @@ void checkOrderFromServer() {
     HTTPClient http;
     String url = urlCheckOrder + "?ssid=" + wifi_ssid;
     
-    // Gunakan secureClient dengan setInsecure untuk kompatibilitas HTTPS
     http.begin(secureClient, url);
     http.setTimeout(4000);
 
@@ -303,7 +311,7 @@ void checkOrderFromServer() {
         if (!error) {
             const char* status = doc["status"];
             
-            // 1. Terima Perintah Ganti WiFi dari Website dana.aspartech.com
+            // 1. Ganti WiFi OTA dari Web
             if (status && strcmp(status, "UPDATE_WIFI") == 0) {
                 String newSsid = doc["wifiSsid"].as<String>();
                 String newPass = doc["wifiPassword"].as<String>();
@@ -321,7 +329,7 @@ void checkOrderFromServer() {
                 return;
             }
 
-            // 2. Terima Notifikasi Pembayaran Sukses dari DANA (PAID)
+            // 2. Pembayaran DANA Sukses (PAID)
             if (status && strcmp(status, "PAID") == 0) {
                 String orderId = doc["orderId"].as<String>();
                 float targetLiters = doc["targetLiter"].as<float>();
@@ -329,8 +337,6 @@ void checkOrderFromServer() {
                 startFilling(orderId, targetLiters);
             }
         }
-    } else {
-        Serial.printf("ℹ️ Polling Server status code: %d\n", httpCode);
     }
     http.end();
 }
@@ -358,11 +364,12 @@ void setup() {
 
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
 
-    // Bypass verifikasi SSL Certificate agar ESP32 lancar konek ke HTTPS dana.aspartech.com
+    // Bypass SSL Certificate untuk HTTPS
     secureClient.setInsecure();
 
     loadStoredWiFi();
 
+    // Coba koneksi ke WiFi
     if (!connectToWiFi(15)) {
         startEmergencyAP();
     }
@@ -377,7 +384,7 @@ void loop() {
         return;
     }
 
-    // Polling Cloud Server setiap 2 detik saat standby
+    // Polling server setiap 2 detik saat standby
     if (!isFilling) {
         if (millis() - lastPollTime >= POLL_INTERVAL) {
             lastPollTime = millis();
@@ -385,7 +392,7 @@ void loop() {
         }
     }
 
-    // Hitung debit & volume air setiap 1 detik
+    // Hitung volume air setiap 1 detik
     if ((millis() - oldTime) > 1000) {
         detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
         
