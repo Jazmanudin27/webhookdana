@@ -331,6 +331,7 @@ export default function App() {
                 onOrderCreated={(order) => setActivePendingOrder(order)}
                 onSimulatePayment={handleSimulatePayment}
                 activePendingOrder={activePendingOrder}
+                systemState={systemState}
               />
             </div>
           </div>

@@ -1,8 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { QrCode, Sparkles, ShoppingBag, Loader2, RefreshCw, Droplet, CreditCard, ChevronRight, Check } from 'lucide-react';
+import { 
+  QrCode, 
+  Sparkles, 
+  ShoppingBag, 
+  Loader2, 
+  RefreshCw, 
+  Droplet, 
+  CreditCard, 
+  AlertTriangle, 
+  PhoneCall, 
+  MessageSquare, 
+  WifiOff,
+  UserX
+} from 'lucide-react';
 
-export default function OrderSimulator({ onOrderCreated, onSimulatePayment, activePendingOrder }) {
+export default function OrderSimulator({ onOrderCreated, onSimulatePayment, activePendingOrder, systemState }) {
   const [packages, setPackages] = useState([]);
   const [selectedPackageId, setSelectedPackageId] = useState(null);
   const [customLiter, setCustomLiter] = useState(19);
@@ -10,6 +23,9 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
   const [customerName, setCustomerName] = useState('Pelanggan Depot');
   const [isCreating, setIsCreating] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+
+  // Status Perangkat ESP32
+  const isDeviceOffline = systemState?.esp32Status !== 'ONLINE';
 
   const fetchPackages = async () => {
     try {
@@ -46,6 +62,8 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
 
   const handleCreateOrder = async (e) => {
     e?.preventDefault();
+    if (isDeviceOffline) return;
+
     setIsCreating(true);
     try {
       const response = await fetch('/api/dana/create-order', {
@@ -99,14 +117,48 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
         </div>
       </div>
 
+      {/* ⚠️ BANNER PERINGATAN JIKA ESP32 OFFLINE / GANGGUAN */}
+      {isDeviceOffline && (
+        <div className="mb-5 p-4 rounded-2xl bg-rose-950/70 border border-rose-500/40 shadow-xl shadow-rose-950/40 text-left relative z-10 animate-pulse">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400 mt-0.5 flex-shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-extrabold text-rose-300 tracking-tight flex items-center gap-2">
+                MESIN DEPOT SEDANG GANGGUAN / OFFLINE
+              </h4>
+              <p className="text-xs text-rose-200/90 mt-1 leading-relaxed">
+                Mohon maaf, mesin pengisian air otomatis saat ini <strong>tidak dapat digunakan</strong> karena perangkat pengisi belum terhubung atau sedang dalam pemeliharaan.
+              </p>
+              <div className="mt-3 pt-2.5 border-t border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-[11px] text-rose-300 font-semibold flex items-center gap-1.5">
+                  <UserX className="w-3.5 h-3.5" /> Silahkan Hubungi Admin / Karyawan Depot
+                </span>
+                <a
+                  href="https://wa.me/6281234567890?text=Halo%20Admin%20Depot%2C%20mesin%20pengisian%20air%20sedang%20offline%20atau%20gangguan"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all shadow-md self-start sm:self-auto"
+                >
+                  <MessageSquare className="w-3 h-3" />
+                  <span>Hubungi Admin (WhatsApp)</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Dynamic Package Cards Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4 relative z-10">
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4 relative z-10 ${isDeviceOffline ? 'opacity-40 pointer-events-none' : ''}`}>
         {packages.map((pkg) => {
           const isSelected = !isCustom && selectedPackageId === pkg.id;
           return (
             <button
               key={pkg.id}
               type="button"
+              disabled={isDeviceOffline}
               onClick={() => {
                 setSelectedPackageId(pkg.id);
                 setIsCustom(false);
@@ -141,6 +193,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
         {/* Custom Liter Button */}
         <button
           type="button"
+          disabled={isDeviceOffline}
           onClick={() => setIsCustom(true)}
           className={`p-3.5 rounded-2xl border text-left transition-all duration-300 relative ${
             isCustom
@@ -160,7 +213,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
       </div>
 
       {/* Input if custom */}
-      {isCustom && (
+      {isCustom && !isDeviceOffline && (
         <div className="mb-4 bg-purple-950/30 p-3.5 rounded-2xl border border-purple-500/30 relative z-10">
           <label className="block text-xs font-bold text-purple-300 mb-1.5 flex items-center justify-between">
             <span>Masukkan Volume Air (Liter):</span>
@@ -179,7 +232,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
       )}
 
       {/* Customer Name Input */}
-      <div className="mb-4 relative z-10">
+      <div className={`mb-4 relative z-10 ${isDeviceOffline ? 'opacity-40 pointer-events-none' : ''}`}>
         <label className="block text-xs font-bold text-slate-400 mb-1.5">
           Nama Pembeli (Opsional)
         </label>
@@ -188,6 +241,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
           value={customerName}
           onChange={(e) => setCustomerName(e.target.value)}
           placeholder="Contoh: Budi Santoso"
+          disabled={isDeviceOffline}
           className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 font-sans shadow-inner"
         />
       </div>
@@ -195,19 +249,29 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
       {/* Generate Order Button */}
       <button
         onClick={handleCreateOrder}
-        disabled={isCreating}
-        className="w-full py-3 px-4 bg-gradient-to-r from-[#118EEA] via-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 active:scale-[0.99] text-white font-extrabold rounded-2xl text-xs sm:text-sm shadow-xl shadow-blue-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 relative z-10"
+        disabled={isCreating || isDeviceOffline}
+        className={`w-full py-3.5 px-4 font-extrabold rounded-2xl text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all relative z-10 ${
+          isDeviceOffline
+            ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+            : 'bg-gradient-to-r from-[#118EEA] via-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 active:scale-[0.99] text-white shadow-blue-600/30'
+        }`}
       >
         {isCreating ? (
           <Loader2 className="w-4 h-4 animate-spin" />
+        ) : isDeviceOffline ? (
+          <WifiOff className="w-4 h-4 text-slate-500" />
         ) : (
           <QrCode className="w-4 h-4" />
         )}
-        <span>GENERATE QRIS DANA (Rp {getActivePrice().toLocaleString('id-ID')})</span>
+        <span>
+          {isDeviceOffline 
+            ? 'TIDAK DAPAT DIGUNAKAN (SEDANG GANGGUAN / OFFLINE)' 
+            : `GENERATE QRIS DANA (Rp ${getActivePrice().toLocaleString('id-ID')})`}
+        </span>
       </button>
 
       {/* Active QR Code & Quick Pay Section */}
-      {activePendingOrder && (
+      {activePendingOrder && !isDeviceOffline && (
         <div className="mt-5 p-5 rounded-2xl bg-gradient-to-b from-slate-900 via-blue-950/50 to-slate-950 border border-cyan-500/40 flex flex-col items-center text-center shadow-2xl relative z-10 animate-fadeIn">
           
           <div className="flex items-center justify-between w-full mb-3.5">
@@ -234,7 +298,6 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
             Scan dari aplikasi DANA Sandbox atau klik tombol simulasi di bawah:
           </div>
 
-          {/* 1-Click Instant Payment Button */}
           <button
             onClick={() => handleQuickPay(activePendingOrder.orderId)}
             disabled={isSimulating}
