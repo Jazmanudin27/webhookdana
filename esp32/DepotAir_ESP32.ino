@@ -1,6 +1,6 @@
 /*
   ===========================================================================================
-  PROYEK   : DEPOT AIR ISI ULANG OTOMATIS - DANA.ASPARTECH.COM
+  PROYEK   : DEPOT AIR ISI ULANG OTOMATIS - DANA.ASPARTECH.COM (FIXED)
   PINOUT   : 
     - GPIO 18 : Water Flow Sensor YF-S201 (Signal Kuning)
     - GPIO 26 : Relay Solenoid Valve 12V (IN Relay)
@@ -40,15 +40,17 @@ const char* AP_SSID = "ESP32_Depot_Air";
 const char* AP_PASS = "12345678";
 WebServer apServer(80);
 bool isApMode = false;
+bool shouldRestart = false;
+unsigned long restartTimer = 0;
 
 // ==========================================================
 // 2. PENETAPAN PIN ESP32
 // ==========================================================
-const int RELAY_PIN       = 26; // Relay Solenoid Valve
-const int BLUE_LED_PIN    = 2;  // LED Indikator Status
-const int BUTTON_STOP_PIN = 4;  // Tombol Darurat (Stop/Pause)
-const int FLOW_SENSOR_PIN = 18; // Sinyal Kuning Sensor Water Flow
-const int BUZZER_PIN      = 19; // Sinyal (+) Buzzer
+const int RELAY_PIN       = 26; // Relay Solenoid Valve 12V (D26)
+const int BLUE_LED_PIN    = 2;  // LED Indikator Status (D2)
+const int BUTTON_STOP_PIN = 32; // Tombol Darurat Manual (D32)
+const int FLOW_SENSOR_PIN = 34; // Sinyal Kuning Sensor Flow YF-S201 (D34)
+const int BUZZER_PIN      = 19; // Buzzer 5V (D19) - Opsi jika nanti dipasang
 
 // Logika Relay (Active LOW)
 const int RELAY_ON  = LOW;
@@ -120,43 +122,23 @@ void saveWiFiToNVS(String newSsid, String newPass) {
 }
 
 // ==========================================================
-// 5. PEMINDAIAN & KONEKSI KE WIFI
+// 5. KONEKSI KE WIFI
 // ==========================================================
-void scanNearbyWiFi() {
-    Serial.println("\n🔍 Memindai sinyal WiFi sekitar...");
-    int n = WiFi.scanNetworks();
-    if (n == 0) {
-        Serial.println("⚠️ Tidak ada jaringan WiFi yang ditemukan.");
-    } else {
-        Serial.printf("📶 Ditemukan %d jaringan WiFi:\n", n);
-        for (int i = 0; i < n; ++i) {
-            String foundSSID = WiFi.SSID(i);
-            bool isTarget = (foundSSID == wifi_ssid);
-            Serial.printf("   [%d] %s (%d dBm) %s\n", 
-                          i + 1, 
-                          foundSSID.c_str(), 
-                          WiFi.RSSI(i), 
-                          isTarget ? " <--- [TARGET HOTSPOT]" : "");
-        }
-    }
-}
-
-bool connectToWiFi(int timeoutSeconds = 25) {
+bool connectToWiFi(int timeoutSeconds = 20) {
     Serial.println("\n-------------------------------------------------");
     Serial.print("📡 Target SSID    : "); Serial.println(wifi_ssid);
     Serial.print("🔑 Target Password: "); Serial.println(wifi_password);
     Serial.println("-------------------------------------------------");
     Serial.flush();
 
-    WiFi.mode(WIFI_STA);
-    delay(100);
-
-    // Scan untuk memastikan Hotspot HP terdeteksi oleh ESP32
-    scanNearbyWiFi();
+    WiFi.disconnect(true);
     delay(200);
-
-    Serial.print("\n⏳ Mencoba menyambungkan ke ");
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    
+    Serial.print("⏳ Mencoba menyambungkan ke ");
     Serial.println(wifi_ssid);
+    
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
     unsigned long startAttemptTime = millis();
@@ -189,7 +171,8 @@ bool connectToWiFi(int timeoutSeconds = 25) {
 // ==========================================================
 void startEmergencyAP() {
     isApMode = true;
-    WiFi.disconnect();
+    WiFi.disconnect(true);
+    delay(100);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, AP_PASS);
 
@@ -221,8 +204,9 @@ void startEmergencyAP() {
             String resp = "<html><body style='background:#0f172a;color:#fff;text-align:center;padding:40px;font-family:sans-serif;'>"
                           "<h2>✅ Tersimpan!</h2><p>ESP32 sedang me-restart untuk konek ke " + s + "...</p></body></html>";
             apServer.send(200, "text/html", resp);
-            delay(1500);
-            ESP.restart();
+            
+            shouldRestart = true;
+            restartTimer = millis();
         }
     });
 
@@ -337,7 +321,6 @@ void checkOrderFromServer() {
         if (!error) {
             const char* status = doc["status"];
             
-            // 1. Ganti WiFi OTA dari Web
             if (status && strcmp(status, "UPDATE_WIFI") == 0) {
                 String newSsid = doc["wifiSsid"].as<String>();
                 String newPass = doc["wifiPassword"].as<String>();
@@ -355,7 +338,6 @@ void checkOrderFromServer() {
                 return;
             }
 
-            // 2. Pembayaran DANA Sukses (PAID)
             if (status && strcmp(status, "PAID") == 0) {
                 String orderId = doc["orderId"].as<String>();
                 float targetLiters = doc["targetLiter"].as<float>();
@@ -371,7 +353,6 @@ void checkOrderFromServer() {
 // 9. SETUP
 // ==========================================================
 void setup() {
-    // 1. Nonaktifkan Brownout Detector agar ESP32 tidak restart saat transmisi WiFi
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
     Serial.begin(115200);
@@ -381,7 +362,6 @@ void setup() {
     Serial.println("💧 ESP32 DEPOT AIR OTOMATIS - DANA.ASPARTECH.COM");
     Serial.println("=================================================");
 
-    // Inisialisasi pin output penting
     pinMode(RELAY_PIN, OUTPUT);
     digitalWrite(RELAY_PIN, RELAY_OFF);
 
@@ -391,19 +371,16 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);
     digitalWrite(BUZZER_PIN, LOW);
 
-    // Bypass SSL Certificate untuk HTTPS
     secureClient.setInsecure();
 
     loadStoredWiFi();
 
-    // Coba koneksi ke WiFi
     if (!connectToWiFi(15)) {
         startEmergencyAP();
     }
 
-    // Pasang Sensor & Interrupt SETELAH WiFi tersambung (mencegah freeze akibat noise pin)
     pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
-    pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+    pinMode(FLOW_SENSOR_PIN, INPUT); // D34 adalah input only (tanpa internal pullup)
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
 }
 
@@ -411,12 +388,15 @@ void setup() {
 // 10. LOOP UTAMA
 // ==========================================================
 void loop() {
+    if (shouldRestart && (millis() - restartTimer >= 1000)) {
+        ESP.restart();
+    }
+
     if (isApMode) {
         apServer.handleClient();
         return;
     }
 
-    // Polling server setiap 2 detik saat standby
     if (!isFilling) {
         if (millis() - lastPollTime >= POLL_INTERVAL) {
             lastPollTime = millis();
@@ -424,7 +404,6 @@ void loop() {
         }
     }
 
-    // Hitung volume air setiap 1 detik
     if ((millis() - oldTime) > 1000) {
         detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
         
@@ -453,7 +432,6 @@ void loop() {
         attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
     }
 
-    // Tombol Darurat Manual
     int btnRead = digitalRead(BUTTON_STOP_PIN);
     if (btnRead == LOW && lastButtonState == HIGH) {
         if (millis() - lastDebounceTime > 250) {
