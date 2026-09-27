@@ -4,124 +4,91 @@
 
 :root {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 code, pre, .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Bright Fresh Water Kiosk Background (Like AIRO Smart Water Kiosk) */
-body {
-  background: linear-gradient(145deg, #f0f9ff 0%, #e0f2fe 30%, #bae6fd 70%, #7dd3fc 100%);
-  color: #0f2744;
-  min-height: 100vh;
-  margin: 0;
-  background-attachment: fixed;
-}
-
-/* Water Ambient Shimmer Wave Pattern in Background */
-body::before {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image: 
-    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.7) 0%, transparent 25%),
-    radial-gradient(circle at 80% 30%, rgba(56, 189, 248, 0.25) 0%, transparent 40%),
-    radial-gradient(circle at 50% 85%, rgba(14, 165, 233, 0.18) 0%, transparent 45%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* Bright Aquatic Custom Scrollbars */
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #e0f2fe;
+  background: rgba(10, 15, 30, 0.8);
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  background: rgba(56, 189, 248, 0.25);
   border-radius: 9999px;
-  border: 2px solid #e0f2fe;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #0284c7, #0369a1);
+  background: rgba(56, 189, 248, 0.5);
 }
 
-/* Commercial Kiosk Pure White & Cyan Glassmorphism Cards */
-.glass-card, .glass-panel {
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1.5px solid #bae6fd;
-  box-shadow: 0 10px 30px -5px rgba(2, 132, 199, 0.12), 0 0 15px rgba(56, 189, 248, 0.08);
-  border-radius: 1.5rem;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.glass-card:hover, .glass-panel:hover {
-  border-color: #38bdf8;
-  box-shadow: 0 16px 36px -8px rgba(2, 132, 199, 0.2), 0 0 20px rgba(56, 189, 248, 0.12);
+/* Glassmorphism & Cyber Gradients */
+.glass-card {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(11, 19, 38, 0.7) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(56, 189, 248, 0.12);
+  box-shadow: 0 10px 35px -5px rgba(0, 0, 0, 0.5), 0 0 20px -2px rgba(16, 142, 234, 0.05);
 }
 
 .glass-card-glow {
-  background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%);
-  border: 2px solid #0284c7;
-  box-shadow: 0 0 35px rgba(14, 165, 233, 0.28), 0 12px 35px -5px rgba(2, 132, 199, 0.18);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(14, 30, 60, 0.8) 100%);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 30px -5px rgba(16, 142, 234, 0.25), inset 0 0 15px rgba(56, 189, 248, 0.1);
 }
 
 .glass-card-emerald {
-  background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
-  border: 2px solid #059669;
-  box-shadow: 0 0 30px rgba(16, 185, 129, 0.22);
+  background: linear-gradient(135deg, rgba(6, 30, 25, 0.9) 0%, rgba(15, 23, 42, 0.8) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 30px -5px rgba(16, 185, 129, 0.25);
 }
 
-/* Water Tank Realistic Liquid Gradient */
+/* Water Tank & Waves */
 .water-fill-gradient {
   background: linear-gradient(180deg, 
-    rgba(56, 189, 248, 0.95) 0%, 
-    rgba(14, 165, 233, 0.95) 30%, 
-    rgba(2, 132, 199, 0.98) 70%,
+    rgba(56, 189, 248, 0.88) 0%, 
+    rgba(14, 165, 233, 0.92) 40%, 
+    rgba(2, 132, 199, 0.96) 80%,
     rgba(3, 105, 161, 1) 100%
   );
-  box-shadow: inset 0 4px 15px rgba(255, 255, 255, 0.6), 0 0 25px rgba(56, 189, 248, 0.35);
 }
 
-/* Rising Bubbles inside Water */
+/* Floating Bubbles Animation */
 @keyframes bubble-up {
-  0% { transform: translateY(100%) scale(0.5); opacity: 0; }
-  50% { opacity: 0.9; }
-  100% { transform: translateY(-130%) scale(1.2); opacity: 0; }
+  0% { transform: translateY(100%) scale(0.6); opacity: 0; }
+  50% { opacity: 0.8; }
+  100% { transform: translateY(-120%) scale(1.1); opacity: 0; }
 }
 
 .bubble {
   position: absolute;
-  background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.95), rgba(186, 230, 253, 0.7) 60%, rgba(56, 189, 248, 0.3));
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 50%;
   pointer-events: none;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
   animation: bubble-up 2.2s infinite ease-in;
 }
 
 /* Water Wave Surface */
 @keyframes wave-motion {
   0% { transform: translateX(0) translateZ(0) scaleY(1); }
-  50% { transform: translateX(-25%) translateZ(0) scaleY(1.2); }
+  50% { transform: translateX(-25%) translateZ(0) scaleY(1.15); }
   100% { transform: translateX(-50%) translateZ(0) scaleY(1); }
 }
 
-.animate-wave {
-  animation: wave-motion 2.5s cubic-bezier(0.36, 0.45, 0.63, 0.53) infinite;
-}
-
-/* Kiosk LED Neon Strips (like inside the chamber in the photo) */
-.led-strip-blue {
-  box-shadow: 0 0 15px #0284c7, 0 0 30px #38bdf8;
+.wave-layer {
+  position: absolute;
+  top: -12px;
+  left: 0;
+  width: 200%;
+  height: 20px;
+  background-repeat: repeat-x;
+  animation: wave-motion 3s cubic-bezier(0.36, 0.45, 0.63, 0.53) infinite;
 }
 
 /* QRIS Laser Scan Line */
@@ -137,7 +104,18 @@ body::before {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, rgba(14, 165, 233, 0) 0%, rgba(56, 189, 248, 1) 50%, rgba(14, 165, 233, 0) 100%);
-  box-shadow: 0 0 15px rgba(56, 189, 248, 1);
+  background: linear-gradient(90deg, rgba(16, 142, 234, 0) 0%, rgba(56, 189, 248, 1) 50%, rgba(16, 142, 234, 0) 100%);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.9);
   animation: laser-scan 2s ease-in-out infinite;
+}
+
+/* Neon Glow Utilities */
+.neon-glow-blue {
+  box-shadow: 0 0 20px rgba(16, 142, 234, 0.35);
+}
+.neon-glow-cyan {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+}
+.neon-glow-emerald {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
 }

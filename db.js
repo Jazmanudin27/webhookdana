@@ -10,12 +10,31 @@ const TRANSACTIONS_FILE = path.join(DATA_DIR, 'transactions.json');
 const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
 const PACKAGES_FILE = path.join(DATA_DIR, 'packages.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const MACHINES_FILE = path.join(DATA_DIR, 'machines.json');
 
 // Default initial data
 const DEFAULT_PACKAGES = [
   { id: 1, name: '1 Galon (19L)', liters: 19, price: 7000, badge: 'Populer', isActive: 1 },
   { id: 2, name: '2 Galon (38L)', liters: 38, price: 14000, badge: 'Hemat', isActive: 1 },
   { id: 3, name: 'Galon Mini (10L)', liters: 10, price: 4000, badge: 'Praktis', isActive: 1 }
+];
+
+const DEFAULT_MACHINES = [
+  {
+    id: 'DEPOT-001',
+    name: 'Depot Pusat (Prototipe)',
+    location: 'Workshop Pusat',
+    status: 'ONLINE',
+    totalLiters: 0,
+    totalRevenue: 0,
+    filterLimitLiters: 10000,
+    filterUsedLiters: 0,
+    lastSeen: new Date().toISOString(),
+    ip: '127.0.0.1',
+    ssid: 'Ade',
+    isActive: 1,
+    createdAt: new Date().toISOString()
+  }
 ];
 
 let pool = null;
@@ -25,6 +44,7 @@ let isMySqlConnected = false;
 let memPackages = [...DEFAULT_PACKAGES];
 let memTransactions = [];
 let memLogs = [];
+let memMachines = [...DEFAULT_MACHINES];
 let memSettings = {
   wifi_ssid: 'WiFi_Depot_Air',
   wifi_password: '',
@@ -37,6 +57,7 @@ try {
   if (fs.existsSync(TRANSACTIONS_FILE)) memTransactions = JSON.parse(fs.readFileSync(TRANSACTIONS_FILE, 'utf8'));
   if (fs.existsSync(LOGS_FILE)) memLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
   if (fs.existsSync(SETTINGS_FILE)) memSettings = { ...memSettings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
+  if (fs.existsSync(MACHINES_FILE)) memMachines = JSON.parse(fs.readFileSync(MACHINES_FILE, 'utf8'));
 } catch (e) {}
 
 async function initDB() {
@@ -103,6 +124,30 @@ async function initDB() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
+      // Migrasi: Tambahkan kolom device_id ke tabel transactions jika belum ada
+      try {
+        await pool.query('ALTER TABLE transactions ADD COLUMN device_id VARCHAR(50) DEFAULT "DEPOT-001"');
+      } catch (e) {}
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS depot_machines (
+          id VARCHAR(50) PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          location VARCHAR(255) DEFAULT '',
+          status VARCHAR(50) DEFAULT 'OFFLINE',
+          total_liters DECIMAL(10,2) DEFAULT 0,
+          total_revenue INT DEFAULT 0,
+          filter_limit_liters INT DEFAULT 10000,
+          filter_used_liters DECIMAL(10,2) DEFAULT 0,
+          last_seen DATETIME NULL,
+          ip VARCHAR(50) DEFAULT '',
+          ssid VARCHAR(100) DEFAULT '',
+          is_active TINYINT(1) DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+
       await pool.query(`
         CREATE TABLE IF NOT EXISTS system_settings (
           setting_key VARCHAR(50) PRIMARY KEY,
@@ -122,6 +167,15 @@ async function initDB() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+
+      // Seed mesin awal jika masih kosong
+      const [machRows] = await pool.query('SELECT COUNT(*) as count FROM depot_machines');
+      if (machRows[0].count === 0) {
+        await pool.query(
+          'INSERT INTO depot_machines (id, name, location, status, filter_limit_liters) VALUES (?, ?, ?, ?, ?)',
+          ['DEPOT-001', 'Depot Pusat (Prototipe)', 'Kantor Pusat / Workshop', 'ONLINE', 10000]
+        );
+      }
 
       // Seed paket awal jika masih kosong
       const [rows] = await pool.query('SELECT COUNT(*) as count FROM packages');
@@ -239,14 +293,24 @@ async function deletePackage(id) {
 // =====================================
 // TRANSACTIONS DAO
 // =====================================
-async function getTransactions(limit = 100) {
+async function getTransactions(limit = 100, deviceId = null) {
   if (isMySqlConnected) {
     try {
-      const [rows] = await pool.query('SELECT * FROM transactions ORDER BY id DESC LIMIT ?', [limit]);
+      let query = 'SELECT * FROM transactions';
+      const params = [];
+      if (deviceId) {
+        query += ' WHERE device_id = ?';
+        params.push(deviceId);
+      }
+      query += ' ORDER BY id DESC LIMIT ?';
+      params.push(limit);
+
+      const [rows] = await pool.query(query, params);
       return rows.map(r => ({
         id: r.id,
         orderId: r.order_id,
         merchantTransId: r.merchant_trans_id,
+        deviceId: r.device_id || 'DEPOT-001',
         customerName: r.customer_name,
         title: r.title,
         targetLiter: Number(r.target_liter),
@@ -266,7 +330,11 @@ async function getTransactions(limit = 100) {
       console.error('MySQL getTransactions error:', e.message);
     }
   }
-  return memTransactions.slice(0, limit);
+  let txs = memTransactions;
+  if (deviceId) {
+    txs = txs.filter(t => (t.deviceId || 'DEPOT-001') === deviceId);
+  }
+  return txs.slice(0, limit);
 }
 
 async function findTransaction(orderId) {
@@ -279,6 +347,7 @@ async function findTransaction(orderId) {
           id: r.id,
           orderId: r.order_id,
           merchantTransId: r.merchant_trans_id,
+          deviceId: r.device_id || 'DEPOT-001',
           customerName: r.customer_name,
           title: r.title,
           targetLiter: Number(r.target_liter),
@@ -298,15 +367,19 @@ async function findTransaction(orderId) {
 }
 
 async function saveTransaction(tx) {
+  const machineId = tx.deviceId || tx.machineId || 'DEPOT-001';
+  tx.deviceId = machineId;
+
   if (isMySqlConnected) {
     try {
       await pool.query(`
         INSERT INTO transactions 
-        (order_id, merchant_trans_id, customer_name, title, target_liter, dispensed_liter, amount, currency, status, qr_string, checkout_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (order_id, merchant_trans_id, device_id, customer_name, title, target_liter, dispensed_liter, amount, currency, status, qr_string, checkout_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         tx.orderId,
         tx.merchantTransId || tx.orderId,
+        machineId,
         tx.customerName || 'Pelanggan Depot',
         tx.title,
         tx.targetLiter,
@@ -471,6 +544,196 @@ async function getTodayStats() {
   };
 }
 
+// =====================================
+// DEPOT MACHINES (MULTI-CABANG FLEET)
+// =====================================
+async function getMachines() {
+  if (isMySqlConnected) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM depot_machines ORDER BY id ASC');
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        location: r.location,
+        status: r.status,
+        totalLiters: Number(r.total_liters || 0),
+        totalRevenue: Number(r.total_revenue || 0),
+        filterLimitLiters: Number(r.filter_limit_liters || 10000),
+        filterUsedLiters: Number(r.filter_used_liters || 0),
+        lastSeen: r.last_seen,
+        ip: r.ip,
+        ssid: r.ssid,
+        isActive: r.is_active === 1,
+        createdAt: r.created_at
+      }));
+    } catch (e) {
+      console.error('MySQL getMachines error:', e.message);
+    }
+  }
+  return memMachines;
+}
+
+async function getMachine(id) {
+  if (isMySqlConnected) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM depot_machines WHERE id = ? LIMIT 1', [id]);
+      if (rows.length > 0) {
+        const r = rows[0];
+        return {
+          id: r.id,
+          name: r.name,
+          location: r.location,
+          status: r.status,
+          totalLiters: Number(r.total_liters || 0),
+          totalRevenue: Number(r.total_revenue || 0),
+          filterLimitLiters: Number(r.filter_limit_liters || 10000),
+          filterUsedLiters: Number(r.filter_used_liters || 0),
+          lastSeen: r.last_seen,
+          ip: r.ip,
+          ssid: r.ssid,
+          isActive: r.is_active === 1,
+          createdAt: r.created_at
+        };
+      }
+    } catch (e) {
+      console.error('MySQL getMachine error:', e.message);
+    }
+  }
+  return memMachines.find(m => m.id === id);
+}
+
+async function saveMachine(machine) {
+  const { id, name, location, filterLimitLiters } = machine;
+  const filterLimit = Number(filterLimitLiters) || 10000;
+
+  if (isMySqlConnected) {
+    try {
+      await pool.query(`
+        INSERT INTO depot_machines (id, name, location, filter_limit_liters)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE 
+          name = VALUES(name),
+          location = VALUES(location),
+          filter_limit_liters = VALUES(filter_limit_liters)
+      `, [id, name, location || '', filterLimit]);
+      return getMachine(id);
+    } catch (e) {
+      console.error('MySQL saveMachine error:', e.message);
+    }
+  }
+
+  const existingIdx = memMachines.findIndex(m => m.id === id);
+  const updatedItem = {
+    id,
+    name,
+    location: location || '',
+    status: existingIdx >= 0 ? memMachines[existingIdx].status : 'OFFLINE',
+    totalLiters: existingIdx >= 0 ? memMachines[existingIdx].totalLiters : 0,
+    totalRevenue: existingIdx >= 0 ? memMachines[existingIdx].totalRevenue : 0,
+    filterLimitLiters: filterLimit,
+    filterUsedLiters: existingIdx >= 0 ? memMachines[existingIdx].filterUsedLiters : 0,
+    lastSeen: existingIdx >= 0 ? memMachines[existingIdx].lastSeen : null,
+    ip: existingIdx >= 0 ? memMachines[existingIdx].ip : null,
+    ssid: existingIdx >= 0 ? memMachines[existingIdx].ssid : null,
+    isActive: 1,
+    createdAt: existingIdx >= 0 ? memMachines[existingIdx].createdAt : new Date().toISOString()
+  };
+
+  if (existingIdx >= 0) {
+    memMachines[existingIdx] = updatedItem;
+  } else {
+    memMachines.push(updatedItem);
+  }
+  try { fs.writeFileSync(MACHINES_FILE, JSON.stringify(memMachines, null, 2)); } catch (e) {}
+  return updatedItem;
+}
+
+async function deleteMachine(id) {
+  if (id === 'DEPOT-001') {
+    throw new Error('Mesin default DEPOT-001 tidak boleh dihapus.');
+  }
+  if (isMySqlConnected) {
+    try {
+      await pool.query('DELETE FROM depot_machines WHERE id = ?', [id]);
+    } catch (e) {
+      console.error('MySQL deleteMachine error:', e.message);
+    }
+  }
+  memMachines = memMachines.filter(m => m.id !== id);
+  try { fs.writeFileSync(MACHINES_FILE, JSON.stringify(memMachines, null, 2)); } catch (e) {}
+  return true;
+}
+
+async function updateMachineStatus(id, { status, ip, ssid, lastSeen }) {
+  const seenTime = lastSeen ? new Date(lastSeen) : new Date();
+  if (isMySqlConnected) {
+    try {
+      await pool.query(`
+        UPDATE depot_machines 
+        SET status = COALESCE(?, status),
+            ip = COALESCE(?, ip),
+            ssid = COALESCE(?, ssid),
+            last_seen = ?
+        WHERE id = ?
+      `, [status, ip, ssid, seenTime, id]);
+    } catch (e) {
+      console.error('MySQL updateMachineStatus error:', e.message);
+    }
+  }
+
+  const m = memMachines.find(item => item.id === id);
+  if (m) {
+    if (status) m.status = status;
+    if (ip) m.ip = ip;
+    if (ssid) m.ssid = ssid;
+    m.lastSeen = seenTime.toISOString();
+    try { fs.writeFileSync(MACHINES_FILE, JSON.stringify(memMachines, null, 2)); } catch (e) {}
+  }
+}
+
+async function incrementMachineUsage(id, liters, revenue) {
+  const l = Number(liters) || 0;
+  const r = Number(revenue) || 0;
+  if (isMySqlConnected) {
+    try {
+      await pool.query(`
+        UPDATE depot_machines 
+        SET total_liters = total_liters + ?,
+            total_revenue = total_revenue + ?,
+            filter_used_liters = filter_used_liters + ?
+        WHERE id = ?
+      `, [l, r, l, id]);
+    } catch (e) {
+      console.error('MySQL incrementMachineUsage error:', e.message);
+    }
+  }
+
+  const m = memMachines.find(item => item.id === id);
+  if (m) {
+    m.totalLiters = (Number(m.totalLiters) || 0) + l;
+    m.totalRevenue = (Number(m.totalRevenue) || 0) + r;
+    m.filterUsedLiters = (Number(m.filterUsedLiters) || 0) + l;
+    try { fs.writeFileSync(MACHINES_FILE, JSON.stringify(memMachines, null, 2)); } catch (e) {}
+  }
+}
+
+async function resetMachineFilter(id) {
+  if (isMySqlConnected) {
+    try {
+      await pool.query('UPDATE depot_machines SET filter_used_liters = 0 WHERE id = ?', [id]);
+    } catch (e) {
+      console.error('MySQL resetMachineFilter error:', e.message);
+    }
+  }
+
+  const m = memMachines.find(item => item.id === id);
+  if (m) {
+    m.filterUsedLiters = 0;
+    try { fs.writeFileSync(MACHINES_FILE, JSON.stringify(memMachines, null, 2)); } catch (e) {}
+  }
+  return true;
+}
+
 module.exports = {
   initDB,
   isMySqlConnected: () => isMySqlConnected,
@@ -486,5 +749,12 @@ module.exports = {
   setSetting,
   addLog,
   getLogs,
-  getTodayStats
+  getTodayStats,
+  getMachines,
+  getMachine,
+  saveMachine,
+  deleteMachine,
+  updateMachineStatus,
+  incrementMachineUsage,
+  resetMachineFilter
 };

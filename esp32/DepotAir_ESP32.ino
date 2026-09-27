@@ -26,8 +26,11 @@ Preferences preferences;
 WiFiClientSecure secureClient;
 
 // ==========================================================
-// 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
+// 1. DEFAULT KONFIGURASI WIFI, ID MESIN & SERVER CLOUD
 // ==========================================================
+// ID Unik Mesin Depot (Ganti per cabang/lokasi: DEPOT-001, DEPOT-002, DEPOT-003, dst.)
+const String DEVICE_ID = "DEPOT-001";
+
 String wifi_ssid     = "Ade";          // SSID WiFi Router
 String wifi_password = "19052026";     // Password WiFi Router
 
@@ -292,6 +295,7 @@ void notifyServerFinished(bool isFinishedSuccess) {
     http.setTimeout(3000);
 
     StaticJsonDocument<256> doc;
+    doc["deviceId"]        = DEVICE_ID;
     doc["orderId"]         = currentOrderId;
     doc["dispensedLiter"]  = (float)currentFillMl / 1000.0;
     doc["status"]          = isFinishedSuccess ? "COMPLETED" : "EMERGENCY_STOP";
@@ -415,7 +419,8 @@ void checkOrderFromServer() {
     }
 
     // Kirim telemetry + polling perintah sekaligus dalam 1 request cepat
-    String url = urlCheckOrder + "?ssid=" + wifi_ssid + 
+    String url = urlCheckOrder + "?deviceId=" + DEVICE_ID +
+                 "&ssid=" + wifi_ssid + 
                  "&state=" + stateStr + 
                  "&currentLiter=" + String((float)currentFillMl / 1000.0, 2) + 
                  "&flowRate=" + String(flowRate, 1);
@@ -504,6 +509,7 @@ void setup() {
 
     Serial.println("\n=================================================");
     Serial.println("💧 ESP32 DEPOT AIR OTOMATIS - DANA.ASPARTECH.COM");
+    Serial.println("🏭 ID MESIN / CABANG : " + DEVICE_ID);
     Serial.println("=================================================");
 
     pinMode(RELAY_PIN, OUTPUT);

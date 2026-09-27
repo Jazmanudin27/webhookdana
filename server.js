@@ -27,19 +27,35 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
-// System State
-let currentState = {
-  status: 'IDLE', // 'IDLE' | 'PAID' | 'FILLING' | 'PAUSED' | 'EMERGENCY_STOP'
-  activeOrder: null,
-  pendingCommand: null, // 'START' | 'PAUSE' | 'STOP'
-  esp32LastSeen: null,
-  esp32Ip: null,
-  esp32Status: 'OFFLINE',
-  esp32CurrentSsid: null,
-  totalWaterDispensedToday: 0,
-  totalRevenueToday: 0,
-  isMySql: false
-};
+// ==========================================
+// MULTI-MACHINE (FLEET) IN-MEMORY STATE
+// ==========================================
+const machinesState = {};
+
+function getOrCreateMachineState(machineId = 'DEPOT-001') {
+  const mId = (machineId || 'DEPOT-001').toUpperCase().trim();
+  if (!machinesState[mId]) {
+    machinesState[mId] = {
+      machineId: mId,
+      status: 'IDLE', // 'IDLE' | 'PAID' | 'FILLING' | 'PAUSED' | 'EMERGENCY_STOP'
+      activeOrder: null,
+      pendingCommand: null, // 'START' | 'PAUSE' | 'STOP'
+      esp32LastSeen: null,
+      esp32Ip: null,
+      esp32Status: 'OFFLINE',
+      esp32CurrentSsid: null,
+      currentLiter: 0,
+      flowRate: 0,
+      totalWaterDispensedToday: 0,
+      totalRevenueToday: 0,
+      isMySql: false
+    };
+  }
+  return machinesState[mId];
+}
+
+// Default device (DEPOT-001) for backwards compatibility
+const currentState = getOrCreateMachineState('DEPOT-001');
 
 async function refreshStats() {
   const stats = await db.getTodayStats();
@@ -48,19 +64,25 @@ async function refreshStats() {
   currentState.isMySql = db.isMySqlConnected();
 }
 
-// ESP32 Heartbeat Monitor
-setInterval(() => {
-  if (currentState.esp32LastSeen) {
-    const elapsed = Date.now() - new Date(currentState.esp32LastSeen).getTime();
-    const wasOnline = currentState.esp32Status === 'ONLINE';
-    if (elapsed > 25000) {
-      currentState.esp32Status = 'OFFLINE';
-      if (wasOnline) {
-        db.addLog('ESP32', 'WARNING', 'ESP32 Device Terputus (Heartbeat Timeout)');
-        io.emit('system:state', currentState);
+// Multi-Device ESP32 Heartbeat Monitor
+setInterval(async () => {
+  const now = Date.now();
+  for (const mId of Object.keys(machinesState)) {
+    const m = machinesState[mId];
+    if (m.esp32LastSeen) {
+      const elapsed = now - new Date(m.esp32LastSeen).getTime();
+      const wasOnline = m.esp32Status === 'ONLINE';
+      if (elapsed > 25000) {
+        m.esp32Status = 'OFFLINE';
+        if (wasOnline) {
+          db.addLog('ESP32', 'WARNING', `ESP32 Mesin [${mId}] Terputus (Heartbeat Timeout)`);
+          db.updateMachineStatus(mId, { status: 'OFFLINE' });
+          io.emit('machine:updated', m);
+          if (mId === 'DEPOT-001') {
+            io.emit('system:state', m);
+          }
+        }
       }
-    } else {
-      currentState.esp32Status = 'ONLINE';
     }
   }
 }, 3000);
@@ -69,9 +91,14 @@ setInterval(() => {
 // 1. DANA SANDBOX WEBHOOK & ORDER ENDPOINTS
 // ==========================================
 
+// ==========================================
+// 1. DANA SANDBOX WEBHOOK & ORDER ENDPOINTS
+// ==========================================
+
 app.post('/api/dana/create-order', async (req, res) => {
   try {
-    const { packageId, customLiter, customerName } = req.body;
+    const { packageId, customLiter, customerName, deviceId } = req.body;
+    const targetDeviceId = (deviceId || 'DEPOT-001').toUpperCase().trim();
     
     let targetLiter = 19;
     let amount = 7000;
@@ -95,6 +122,7 @@ app.post('/api/dana/create-order', async (req, res) => {
     const newOrder = {
       orderId,
       merchantTransId: orderId,
+      deviceId: targetDeviceId,
       customerName: customerName || 'Pelanggan Depot Air',
       title,
       targetLiter,
@@ -106,12 +134,12 @@ app.post('/api/dana/create-order', async (req, res) => {
       completedAt: null,
       dispensedLiter: 0,
       qrString: `00020101021226670016ID.DANA.WWW01189360000000000000000215${orderId}520454115303360540${amount}.005802ID5914DEPOT AIR DANA6007JAKARTA6304ABCD`,
-      checkoutUrl: `${PUBLIC_BASE_URL}/checkout/${orderId}`
+      checkoutUrl: `${PUBLIC_BASE_URL}/checkout/${orderId}?machine=${targetDeviceId}`
     };
 
     await db.saveTransaction(newOrder);
 
-    const logItem = await db.addLog('DASHBOARD', 'INFO', `Order baru dibuat: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
+    const logItem = await db.addLog('DASHBOARD', 'INFO', `Order baru dibuat [Cabang ${targetDeviceId}]: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
     io.emit('log:new', logItem);
     io.emit('order:created', newOrder);
 
@@ -153,6 +181,7 @@ app.post('/api/dana/finish-notify', async (req, res) => {
       order = {
         orderId: merchantTransId || 'DANA-AUTO-' + Date.now(),
         merchantTransId: merchantTransId || 'DANA-AUTO-' + Date.now(),
+        deviceId: 'DEPOT-001',
         customerName: 'DANA Customer Sandbox',
         title: liter === 38 ? 'Isi Ulang 2 Galon (38L)' : 'Isi Ulang 1 Galon (19L)',
         targetLiter: liter,
@@ -176,9 +205,13 @@ app.post('/api/dana/finish-notify', async (req, res) => {
       order.paidAt = new Date().toISOString();
     }
 
-    currentState.status = 'PAID';
-    currentState.activeOrder = {
+    const targetDeviceId = (order.deviceId || 'DEPOT-001').toUpperCase().trim();
+    const machineState = getOrCreateMachineState(targetDeviceId);
+
+    machineState.status = 'PAID';
+    machineState.activeOrder = {
       orderId: order.orderId,
+      deviceId: targetDeviceId,
       targetLiter: order.targetLiter,
       amount: order.amount,
       title: order.title,
@@ -187,9 +220,12 @@ app.post('/api/dana/finish-notify', async (req, res) => {
     };
 
     io.emit('order:paid', order);
-    io.emit('system:state', currentState);
+    io.emit('machine:updated', machineState);
+    if (targetDeviceId === 'DEPOT-001') {
+      io.emit('system:state', machineState);
+    }
 
-    const logSys = await db.addLog('SYSTEM', 'SUCCESS', `Pembayaran DANA Dikonfirmasi! Mengantrikan Dispenser ESP32: ${order.targetLiter} Liter`, currentState.activeOrder);
+    const logSys = await db.addLog('SYSTEM', 'SUCCESS', `Pembayaran DANA Dikonfirmasi! Mengantrikan Dispenser [Cabang ${targetDeviceId}]: ${order.targetLiter} Liter`, machineState.activeOrder);
     io.emit('log:new', logSys);
 
     return res.status(200).json({
@@ -218,14 +254,16 @@ app.post('/api/dana/finish-notify', async (req, res) => {
 });
 
 app.post('/api/dana/simulate-pay', async (req, res) => {
-  const { orderId } = req.body;
+  const { orderId, deviceId } = req.body;
   let targetOrder = await db.findTransaction(orderId);
+  const targetDeviceId = (deviceId || (targetOrder && targetOrder.deviceId) || 'DEPOT-001').toUpperCase().trim();
 
   if (!targetOrder) {
     const newOrderId = 'DANA-SIM-' + Date.now();
     targetOrder = {
       orderId: newOrderId,
       merchantTransId: newOrderId,
+      deviceId: targetDeviceId,
       customerName: 'Simulasi User',
       title: 'Isi Ulang 1 Galon (19L)',
       targetLiter: 19,
@@ -244,9 +282,11 @@ app.post('/api/dana/simulate-pay', async (req, res) => {
   targetOrder.status = 'PAID';
   targetOrder.paidAt = new Date().toISOString();
 
-  currentState.status = 'PAID';
-  currentState.activeOrder = {
+  const machineState = getOrCreateMachineState(targetDeviceId);
+  machineState.status = 'PAID';
+  machineState.activeOrder = {
     orderId: targetOrder.orderId,
+    deviceId: targetDeviceId,
     targetLiter: targetOrder.targetLiter,
     amount: targetOrder.amount,
     title: targetOrder.title,
@@ -254,14 +294,17 @@ app.post('/api/dana/simulate-pay', async (req, res) => {
     paidAt: targetOrder.paidAt
   };
 
-  const logItem = await db.addLog('DANA_WEBHOOK', 'SUCCESS', `[SIMULASI] Pembayaran Sukses DANA Sandbox untuk Order: ${targetOrder.orderId}`, targetOrder);
+  const logItem = await db.addLog('DANA_WEBHOOK', 'SUCCESS', `[SIMULASI] Pembayaran Sukses DANA Sandbox [Cabang ${targetDeviceId}] untuk Order: ${targetOrder.orderId}`, targetOrder);
   io.emit('log:new', logItem);
   io.emit('order:paid', targetOrder);
-  io.emit('system:state', currentState);
+  io.emit('machine:updated', machineState);
+  if (targetDeviceId === 'DEPOT-001') {
+    io.emit('system:state', machineState);
+  }
 
   return res.json({
     success: true,
-    message: 'Simulasi pembayaran DANA Sandbox sukses!',
+    message: `Simulasi pembayaran DANA Sandbox sukses untuk Cabang ${targetDeviceId}!`,
     order: targetOrder
   });
 });
@@ -271,13 +314,24 @@ app.post('/api/dana/simulate-pay', async (req, res) => {
 // ==========================================
 
 app.get('/api/esp32/check-order', async (req, res) => {
-  currentState.esp32LastSeen = new Date().toISOString();
-  currentState.esp32Ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'ESP32-Client';
-  currentState.esp32Status = 'ONLINE';
+  const deviceId = (req.query.deviceId || req.query.machineId || 'DEPOT-001').toUpperCase().trim();
+  const machineState = getOrCreateMachineState(deviceId);
+
+  machineState.esp32LastSeen = new Date().toISOString();
+  machineState.esp32Ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'ESP32-Client';
+  machineState.esp32Status = 'ONLINE';
 
   if (req.query.ssid) {
-    currentState.esp32CurrentSsid = req.query.ssid;
+    machineState.esp32CurrentSsid = req.query.ssid;
   }
+
+  // Update DB machine status
+  db.updateMachineStatus(deviceId, {
+    status: machineState.status === 'IDLE' ? 'ONLINE' : machineState.status,
+    ip: machineState.esp32Ip,
+    ssid: machineState.esp32CurrentSsid,
+    lastSeen: machineState.esp32LastSeen
+  });
 
   // Terima telemetry & sync status dari ESP32 jika dikirim
   if (req.query.currentLiter !== undefined) {
@@ -285,37 +339,44 @@ app.get('/api/esp32/check-order', async (req, res) => {
     const curFlow = parseFloat(req.query.flowRate) || 0;
     const devState = req.query.state; // 'FILLING' | 'PAUSED' | 'WAITING' | 'IDLE'
 
+    machineState.currentLiter = curLiter;
+    machineState.flowRate = curFlow;
+
     if (devState === 'FILLING') {
-      if (currentState.pendingCommand === 'START' || currentState.pendingCommand === 'RESUME') {
-        currentState.pendingCommand = null;
+      if (machineState.pendingCommand === 'START' || machineState.pendingCommand === 'RESUME') {
+        machineState.pendingCommand = null;
       }
-      if (currentState.status !== 'FILLING') {
-        currentState.status = 'FILLING';
-        io.emit('system:state', currentState);
+      if (machineState.status !== 'FILLING') {
+        machineState.status = 'FILLING';
+        io.emit('machine:updated', machineState);
+        if (deviceId === 'DEPOT-001') io.emit('system:state', machineState);
       }
     } else if (devState === 'PAUSED') {
-      if (currentState.pendingCommand === 'PAUSE') {
-        currentState.pendingCommand = null;
+      if (machineState.pendingCommand === 'PAUSE') {
+        machineState.pendingCommand = null;
       }
-      if (currentState.status !== 'PAUSED') {
-        currentState.status = 'PAUSED';
-        io.emit('system:state', currentState);
+      if (machineState.status !== 'PAUSED') {
+        machineState.status = 'PAUSED';
+        io.emit('machine:updated', machineState);
+        if (deviceId === 'DEPOT-001') io.emit('system:state', machineState);
       }
-    } else if (devState === 'WAITING' && currentState.status !== 'PAID') {
-      currentState.status = 'PAID';
-      io.emit('system:state', currentState);
+    } else if (devState === 'WAITING' && machineState.status !== 'PAID') {
+      machineState.status = 'PAID';
+      io.emit('machine:updated', machineState);
+      if (deviceId === 'DEPOT-001') io.emit('system:state', machineState);
     }
 
     io.emit('esp32:telemetry', {
-      orderId: currentState.activeOrder ? currentState.activeOrder.orderId : (req.query.orderId || null),
+      deviceId,
+      orderId: machineState.activeOrder ? machineState.activeOrder.orderId : (req.query.orderId || null),
       currentLiter: curLiter,
       flowRate: curFlow,
       timestamp: Date.now()
     });
   }
 
-  // 1. Cek Instruksi Ganti WiFi
-  const pendingWifi = await db.getSetting('pending_wifi_update');
+  // 1. Cek Instruksi Ganti WiFi (Targeted per device jika ada)
+  const pendingWifi = await db.getSetting(`pending_wifi_${deviceId}`) || await db.getSetting('pending_wifi_update');
   if (pendingWifi && pendingWifi.ssid) {
     const updatePayload = {
       status: 'UPDATE_WIFI',
@@ -323,78 +384,107 @@ app.get('/api/esp32/check-order', async (req, res) => {
       wifiPassword: pendingWifi.password || '',
       serverTime: Date.now()
     };
-    await db.setSetting('pending_wifi_update', null);
-    const logItem = await db.addLog('SYSTEM', 'INFO', `Instruksi ganti WiFi terkirim ke ESP32 -> SSID: ${updatePayload.wifiSsid}`);
+    await db.setSetting(`pending_wifi_${deviceId}`, null);
+    if (!await db.getSetting(`pending_wifi_${deviceId}`)) {
+      await db.setSetting('pending_wifi_update', null);
+    }
+    const logItem = await db.addLog('SYSTEM', 'INFO', `Instruksi ganti WiFi terkirim ke ESP32 [Cabang ${deviceId}] -> SSID: ${updatePayload.wifiSsid}`);
     io.emit('log:new', logItem);
     return res.status(200).json(updatePayload);
   }
 
   // 1.5. Cek Perintah Kucur Air dari Web (START / PAUSE / RESUME / STOP)
-  if (currentState.pendingCommand) {
-    const cmd = currentState.pendingCommand;
-    currentState.pendingCommand = null;
+  if (machineState.pendingCommand) {
+    const cmd = machineState.pendingCommand;
+    machineState.pendingCommand = null;
     return res.status(200).json({
-      status: cmd, // 'START' | 'PAUSE' | 'RESUME' | 'STOP'
-      orderId: currentState.activeOrder ? currentState.activeOrder.orderId : null,
-      targetLiter: currentState.activeOrder ? currentState.activeOrder.targetLiter : 0,
+      status: cmd,
+      deviceId,
+      orderId: machineState.activeOrder ? machineState.activeOrder.orderId : null,
+      targetLiter: machineState.activeOrder ? machineState.activeOrder.targetLiter : 0,
       serverTime: Date.now()
     });
   }
 
   // 2. Cek Order PAID / PAUSED
-  if ((currentState.status === 'PAID' || currentState.status === 'PAUSED') && currentState.activeOrder) {
+  if ((machineState.status === 'PAID' || machineState.status === 'PAUSED') && machineState.activeOrder) {
     return res.status(200).json({
-      status: currentState.status,
-      orderId: currentState.activeOrder.orderId,
-      targetLiter: currentState.activeOrder.targetLiter,
-      price: currentState.activeOrder.amount,
-      productName: currentState.activeOrder.title,
+      status: machineState.status,
+      deviceId,
+      orderId: machineState.activeOrder.orderId,
+      targetLiter: machineState.activeOrder.targetLiter,
+      price: machineState.activeOrder.amount,
+      productName: machineState.activeOrder.title,
       serverTime: Date.now()
     });
   }
 
   // 3. Standby / IDLE / FILLING
   return res.status(200).json({
-    status: currentState.status === 'FILLING' ? 'FILLING' : 'IDLE',
-    orderId: currentState.activeOrder ? currentState.activeOrder.orderId : null,
-    targetLiter: currentState.activeOrder ? currentState.activeOrder.targetLiter : 0,
+    status: machineState.status === 'FILLING' ? 'FILLING' : 'IDLE',
+    deviceId,
+    orderId: machineState.activeOrder ? machineState.activeOrder.orderId : null,
+    targetLiter: machineState.activeOrder ? machineState.activeOrder.targetLiter : 0,
     serverTime: Date.now()
   });
 });
 
-// Endpoint Kontrol Tombol Kucur Air dari Web
+// Endpoint Kontrol Tombol Kucur Air dari Web (Multi-Cabang)
 app.post('/api/dispenser/action', (req, res) => {
-  const { action } = req.body; // 'TOGGLE' | 'START' | 'PAUSE' | 'RESUME' | 'STOP'
+  const { action, deviceId } = req.body; // 'TOGGLE' | 'START' | 'PAUSE' | 'RESUME' | 'STOP'
+  const targetDeviceId = (deviceId || 'DEPOT-001').toUpperCase().trim();
+  const machineState = getOrCreateMachineState(targetDeviceId);
   
   if (action === 'TOGGLE') {
-    if (currentState.status === 'PAID' || currentState.status === 'PAUSED') {
-      currentState.status = 'FILLING';
-      currentState.pendingCommand = 'START';
-    } else if (currentState.status === 'FILLING') {
-      currentState.status = 'PAUSED';
-      currentState.pendingCommand = 'PAUSE';
+    if (machineState.status === 'PAID' || machineState.status === 'PAUSED') {
+      machineState.status = 'FILLING';
+      machineState.pendingCommand = 'START';
+    } else if (machineState.status === 'FILLING') {
+      machineState.status = 'PAUSED';
+      machineState.pendingCommand = 'PAUSE';
     }
   } else if (action === 'START' || action === 'RESUME') {
-    currentState.status = 'FILLING';
-    currentState.pendingCommand = 'START';
+    machineState.status = 'FILLING';
+    machineState.pendingCommand = 'START';
   } else if (action === 'PAUSE') {
-    currentState.status = 'PAUSED';
-    currentState.pendingCommand = 'PAUSE';
+    machineState.status = 'PAUSED';
+    machineState.pendingCommand = 'PAUSE';
   } else if (action === 'STOP') {
-    currentState.status = 'IDLE';
-    currentState.activeOrder = null;
-    currentState.pendingCommand = 'STOP';
+    machineState.status = 'IDLE';
+    machineState.activeOrder = null;
+    machineState.pendingCommand = 'STOP';
   }
 
-  io.emit('system:state', currentState);
-  return res.json({ success: true, status: currentState.status });
+  io.emit('machine:updated', machineState);
+  if (targetDeviceId === 'DEPOT-001') {
+    io.emit('system:state', machineState);
+  }
+  return res.json({ success: true, deviceId: targetDeviceId, status: machineState.status });
+});
+
+app.post('/api/depot/emergency-stop', (req, res) => {
+  const { deviceId } = req.body || {};
+  const targetDeviceId = (deviceId || req.query.deviceId || 'DEPOT-001').toUpperCase().trim();
+  const machineState = getOrCreateMachineState(targetDeviceId);
+  
+  machineState.status = 'IDLE';
+  machineState.activeOrder = null;
+  machineState.pendingCommand = 'STOP';
+
+  io.emit('machine:updated', machineState);
+  if (targetDeviceId === 'DEPOT-001') {
+    io.emit('system:state', machineState);
+  }
+  return res.json({ success: true, deviceId: targetDeviceId, status: 'IDLE' });
 });
 
 app.post('/api/esp32/finish-fill', async (req, res) => {
   try {
-    const { orderId, dispensedLiter, durationSeconds, status: fillStatus } = req.body;
+    const { orderId, dispensedLiter, durationSeconds, status: fillStatus, deviceId } = req.body;
     const actualLiter = Number(dispensedLiter) || 0;
     const isEmergency = fillStatus === 'EMERGENCY_STOP';
+    const targetDeviceId = (deviceId || req.query.deviceId || 'DEPOT-001').toUpperCase().trim();
+    const machineState = getOrCreateMachineState(targetDeviceId);
 
     await db.updateTransaction(orderId, {
       status: isEmergency ? 'STOPPED' : 'COMPLETED',
@@ -403,63 +493,163 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
       completedAt: new Date().toISOString()
     });
 
+    const tx = await db.findTransaction(orderId);
+    await db.incrementMachineUsage(targetDeviceId, actualLiter, tx ? tx.amount : 0);
+
     const logMsg = isEmergency 
-      ? `Pengisian dihentikan darurat: ${orderId} (${actualLiter}L)`
-      : `Pengisian Air Selesai: ${orderId} (${actualLiter}L)`;
+      ? `Pengisian dihentikan darurat [Cabang ${targetDeviceId}]: ${orderId} (${actualLiter}L)`
+      : `Pengisian Air Selesai [Cabang ${targetDeviceId}]: ${orderId} (${actualLiter}L)`;
     const logItem = await db.addLog('ESP32', isEmergency ? 'WARNING' : 'SUCCESS', logMsg, req.body);
     io.emit('log:new', logItem);
 
-    currentState.status = 'IDLE';
-    currentState.activeOrder = null;
+    machineState.status = 'IDLE';
+    machineState.activeOrder = null;
+    machineState.currentLiter = 0;
+    machineState.flowRate = 0;
     await refreshStats();
 
     io.emit('order:completed', {
       orderId,
+      deviceId: targetDeviceId,
       dispensedLiter: actualLiter,
       status: isEmergency ? 'STOPPED' : 'COMPLETED',
       completedAt: new Date().toISOString()
     });
-    io.emit('system:state', currentState);
+    io.emit('machine:updated', machineState);
+    if (targetDeviceId === 'DEPOT-001') {
+      io.emit('system:state', machineState);
+    }
 
-    return res.status(200).json({ success: true, status: 'IDLE' });
+    return res.status(200).json({ success: true, deviceId: targetDeviceId, status: 'IDLE' });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 });
 
 app.post('/api/esp32/telemetry', (req, res) => {
-  const { currentLiter, flowRate, pulses, orderId, isFilling, isWaitingButton, isPaused, state } = req.body;
+  const { currentLiter, flowRate, pulses, orderId, isFilling, isWaitingButton, isPaused, state, deviceId } = req.body;
+  const targetDeviceId = (deviceId || req.query.deviceId || 'DEPOT-001').toUpperCase().trim();
+  const machineState = getOrCreateMachineState(targetDeviceId);
   
   // Refresh Heartbeat ESP32 agar status selalu ONLINE
-  currentState.esp32LastSeen = new Date().toISOString();
-  currentState.esp32Status = 'ONLINE';
+  machineState.esp32LastSeen = new Date().toISOString();
+  machineState.esp32Status = 'ONLINE';
+  machineState.currentLiter = Number(currentLiter) || 0;
+  machineState.flowRate = Number(flowRate) || 0;
 
   if (state === 'PAUSED' || isPaused) {
-    if (currentState.status !== 'PAUSED') {
-      currentState.status = 'PAUSED';
-      io.emit('system:state', currentState);
+    if (machineState.status !== 'PAUSED') {
+      machineState.status = 'PAUSED';
+      io.emit('machine:updated', machineState);
+      if (targetDeviceId === 'DEPOT-001') io.emit('system:state', machineState);
     }
   } else if (state === 'FILLING' || isFilling) {
-    if (currentState.status !== 'FILLING') {
-      currentState.status = 'FILLING';
-      io.emit('system:state', currentState);
+    if (machineState.status !== 'FILLING') {
+      machineState.status = 'FILLING';
+      io.emit('machine:updated', machineState);
+      if (targetDeviceId === 'DEPOT-001') io.emit('system:state', machineState);
     }
   } else if (state === 'WAITING' || isWaitingButton) {
-    if (currentState.status !== 'PAID') {
-      currentState.status = 'PAID';
-      io.emit('system:state', currentState);
+    if (machineState.status !== 'PAID') {
+      machineState.status = 'PAID';
+      io.emit('machine:updated', machineState);
+      if (targetDeviceId === 'DEPOT-001') io.emit('system:state', machineState);
     }
   }
   
   io.emit('esp32:telemetry', {
-    orderId: orderId || (currentState.activeOrder ? currentState.activeOrder.orderId : null),
+    deviceId: targetDeviceId,
+    orderId: orderId || (machineState.activeOrder ? machineState.activeOrder.orderId : null),
     currentLiter: Number(currentLiter) || 0,
     flowRate: Number(flowRate) || 0,
     pulses: Number(pulses) || 0,
     timestamp: Date.now()
   });
 
-  return res.json({ ok: true, status: currentState.status });
+  return res.json({ ok: true, deviceId: targetDeviceId, status: machineState.status });
+});
+
+// ==========================================
+// 3. MULTI-CABANG FLEET MANAGEMENT API
+// ==========================================
+
+app.get('/api/machines', async (req, res) => {
+  try {
+    const dbMachines = await db.getMachines();
+    const result = dbMachines.map(m => {
+      const live = getOrCreateMachineState(m.id);
+      return {
+        ...m,
+        status: live.esp32Status === 'ONLINE' ? live.status : 'OFFLINE',
+        esp32Status: live.esp32Status,
+        esp32LastSeen: live.esp32LastSeen || m.lastSeen,
+        esp32Ip: live.esp32Ip || m.ip,
+        esp32CurrentSsid: live.esp32CurrentSsid || m.ssid,
+        activeOrder: live.activeOrder,
+        currentLiter: live.currentLiter,
+        flowRate: live.flowRate
+      };
+    });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/machines', async (req, res) => {
+  try {
+    const { id, name, location, filterLimitLiters } = req.body;
+    if (!id || !name) {
+      return res.status(400).json({ success: false, message: 'ID Mesin dan Nama Cabang wajib diisi!' });
+    }
+    const cleanId = id.toUpperCase().trim().replace(/[^A-Z0-9_-]/g, '');
+    const saved = await db.saveMachine({
+      id: cleanId,
+      name,
+      location: location || '',
+      filterLimitLiters: Number(filterLimitLiters) || 10000
+    });
+    getOrCreateMachineState(cleanId);
+    
+    const logItem = await db.addLog('DASHBOARD', 'SUCCESS', `Cabang Baru Terdaftar: ${cleanId} - ${name} (${location || 'Pusat'})`);
+    io.emit('log:new', logItem);
+    io.emit('machines:updated');
+
+    return res.json({ success: true, data: saved });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/machines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.deleteMachine(id);
+    delete machinesState[id];
+
+    const logItem = await db.addLog('DASHBOARD', 'WARNING', `Cabang ${id} dihapus dari armada depot`);
+    io.emit('log:new', logItem);
+    io.emit('machines:updated');
+
+    return res.json({ success: true, message: `Mesin ${id} berhasil dihapus` });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/machines/:id/reset-filter', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.resetMachineFilter(id);
+
+    const logItem = await db.addLog('MAINTENANCE', 'SUCCESS', `Filter Air pada Cabang [${id}] telah di-reset ke 0 Liter (Selesai Ganti Filter Baru)`);
+    io.emit('log:new', logItem);
+    io.emit('machines:updated');
+
+    return res.json({ success: true, message: `Filter mesin ${id} berhasil di-reset ke 0 L.` });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // WiFi Settings Endpoint
@@ -617,10 +807,26 @@ io.on('connection', async (socket) => {
   socket.emit('system:state', currentState);
   const tx = await db.getTransactions(50);
   const logs = await db.getLogs(50);
+  const dbMachines = await db.getMachines();
+  const machinesWithLive = dbMachines.map(m => {
+    const live = getOrCreateMachineState(m.id);
+    return {
+      ...m,
+      status: live.esp32Status === 'ONLINE' ? live.status : 'OFFLINE',
+      esp32Status: live.esp32Status,
+      esp32LastSeen: live.esp32LastSeen || m.lastSeen,
+      esp32Ip: live.esp32Ip || m.ip,
+      esp32CurrentSsid: live.esp32CurrentSsid || m.ssid,
+      activeOrder: live.activeOrder,
+      currentLiter: live.currentLiter,
+      flowRate: live.flowRate
+    };
+  });
   socket.emit('init:data', {
     transactions: tx,
     logs: logs,
-    state: currentState
+    state: currentState,
+    machines: machinesWithLive
   });
 });
 
