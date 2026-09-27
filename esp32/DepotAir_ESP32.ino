@@ -75,6 +75,10 @@ unsigned long targetFillMl  = 0;
 unsigned long totalAccumulatedMl = 0;
 String currentOrderId = "";
 
+// Timeout Otomatis saat Jeda (60 Detik)
+unsigned long pauseStartTime = 0;
+const unsigned long PAUSE_TIMEOUT_MS = 60000; // 60 detik batas jeda
+
 volatile byte pulseCount = 0;
 float flowRate = 0.0;
 unsigned long oldTime = 0;
@@ -336,6 +340,7 @@ void stopFilling(bool isFinishedSuccess = true) {
     isFilling = false;
     isWaitingButton = false;
     isPaused = false;
+    pauseStartTime = 0;
     
     digitalWrite(RELAY_PIN, RELAY_OFF);
     updateLeds(); // Matikan LED tombol (Standby)
@@ -393,12 +398,13 @@ void handleButtonPress() {
     // 2. Air sedang mengalir -> Pembeli mau JEDA (PAUSE):
     if (isFilling && !isPaused) {
         isPaused = true;
+        pauseStartTime = millis(); // Mulai hitung mundur 60 detik batas jeda
         digitalWrite(RELAY_PIN, RELAY_OFF); // Tutup Solenoid Valve sementara
         updateLeds(); // 🔴 TOMBOL BERUBAH JADI MERAH LAGI!
 
         Serial.println("🔴 --> PENGISIAN DIJEDA (PAUSE). Keran ditutup (Lampu Merah D21 ON)...");
         Serial.printf("   Terisi saat ini: %.2f / %.2f Liter\n", (float)currentFillMl / 1000.0, (float)targetFillMl / 1000.0);
-        Serial.println("   Tekan tombol lagi untuk MELANJUTKAN kucuran air.");
+        Serial.println("   ⏰ Batas waktu jeda: 60 detik. Transaksi otomatis ditutup jika tidak dilanjutkan.");
         triggerBuzzer(2, 70, 60);
         lastPollTime = millis() - 1000; // Sinkronkan ke server 500ms lagi
         return;
@@ -407,6 +413,7 @@ void handleButtonPress() {
     // 3. Sedang Jeda -> Pembeli mau LANJUTKAN (RESUME):
     if (isFilling && isPaused) {
         isPaused = false;
+        pauseStartTime = 0; // Reset timer jeda
         digitalWrite(RELAY_PIN, RELAY_ON); // Buka Solenoid Valve lagi!
         updateLeds(); // 🟢 TOMBOL BERUBAH JADI HIJAU LAGI!
 
@@ -443,12 +450,21 @@ void checkOrderFromServer() {
         stateStr = "FILLING";
     }
 
+    unsigned long pauseRemainingSec = 0;
+    if (isFilling && isPaused && pauseStartTime > 0) {
+        unsigned long elapsed = millis() - pauseStartTime;
+        if (elapsed < PAUSE_TIMEOUT_MS) {
+            pauseRemainingSec = (PAUSE_TIMEOUT_MS - elapsed) / 1000;
+        }
+    }
+
     // Kirim telemetry + polling perintah sekaligus dalam 1 request cepat
     String url = urlCheckOrder + "?deviceId=" + DEVICE_ID +
                  "&ssid=" + wifi_ssid + 
                  "&state=" + stateStr + 
                  "&currentLiter=" + String((float)currentFillMl / 1000.0, 2) + 
-                 "&flowRate=" + String(flowRate, 1);
+                 "&flowRate=" + String(flowRate, 1) +
+                 "&pauseRemaining=" + String(pauseRemainingSec);
 
     if (currentOrderId.length() > 0) {
         url += "&orderId=" + currentOrderId;
@@ -587,6 +603,16 @@ void loop() {
     if (buttonPressedFlag) {
         buttonPressedFlag = false;
         handleButtonPress();
+    }
+
+    // 2. Deteksi Batas Waktu Jeda (Auto-Timeout 60 Detik Otomatis Tutup Transaksi)
+    if (isFilling && isPaused && pauseStartTime > 0) {
+        if (millis() - pauseStartTime >= PAUSE_TIMEOUT_MS) {
+            Serial.println("\n⏰⏰⏰ [AUTO-TIMEOUT JEDA 60 DETIK AKTIF!] ⏰⏰⏰");
+            Serial.printf("ℹ️ Pengisian dijeda > 60 detik. Menutup transaksi otomatis pada %.2f Liter.\n", (float)currentFillMl / 1000.0);
+            pauseStartTime = 0;
+            stopFilling(true); // Selesaikan transaksi otomatis dengan literan yang sudah terisi
+        }
     }
 
     // 3. Polling server rutin (Setiap 1.5 detik di SEMUA status: Standby, Waiting, Filling, Paused)

@@ -408,11 +408,16 @@ app.get('/api/esp32/check-order', async (req, res) => {
       if (deviceId === 'DEPOT-001') io.emit('system:state', machineState);
     }
 
+    if (req.query.pauseRemaining !== undefined) {
+      machineState.pauseRemaining = Number(req.query.pauseRemaining) || 0;
+    }
+
     io.emit('esp32:telemetry', {
       deviceId,
       orderId: machineState.activeOrder ? machineState.activeOrder.orderId : (req.query.orderId || null),
       currentLiter: curLiter,
       flowRate: curFlow,
+      pauseRemaining: machineState.pauseRemaining || 0,
       timestamp: Date.now()
     });
   }
@@ -491,10 +496,30 @@ app.post('/api/dispenser/action', (req, res) => {
   } else if (action === 'PAUSE') {
     machineState.status = 'PAUSED';
     machineState.pendingCommand = 'PAUSE';
-  } else if (action === 'STOP') {
+  } else if (action === 'STOP' || action === 'FINISH_EARLY') {
+    const prevOrder = machineState.activeOrder;
     machineState.status = 'IDLE';
-    machineState.activeOrder = null;
     machineState.pendingCommand = 'STOP';
+    if (prevOrder) {
+      const dispensed = machineState.currentLiter || 0;
+      db.updateTransaction(prevOrder.orderId, {
+        status: 'COMPLETED',
+        dispensedLiter: dispensed,
+        completedAt: new Date().toISOString()
+      });
+      db.incrementMachineUsage(targetDeviceId, dispensed, prevOrder.amount || 0);
+      io.emit('order:completed', {
+        orderId: prevOrder.orderId,
+        deviceId: targetDeviceId,
+        dispensedLiter: dispensed,
+        status: 'COMPLETED',
+        completedAt: new Date().toISOString()
+      });
+      machineState.activeOrder = null;
+      machineState.currentLiter = 0;
+      machineState.flowRate = 0;
+      machineState.pauseRemaining = 0;
+    }
   }
 
   io.emit('machine:updated', machineState);

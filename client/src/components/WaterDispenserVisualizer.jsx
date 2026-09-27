@@ -39,6 +39,25 @@ export default function WaterDispenserVisualizer({
     }
   };
 
+  const handleFinishEarly = async () => {
+    if (isToggling) return;
+    try {
+      setIsToggling(true);
+      await fetch('/api/dispenser/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'FINISH_EARLY',
+          deviceId: selectedMachineId || 'DEPOT-001'
+        })
+      });
+    } catch (err) {
+      console.error('Failed to finish early:', err);
+    } finally {
+      setTimeout(() => setIsToggling(false), 500);
+    }
+  };
+
   const targetLiter = Number(systemState?.activeOrder?.targetLiter) || (isPaid ? 19 : 0);
   const currentLiter = Number(telemetry?.currentLiter) || 0;
   
@@ -281,6 +300,28 @@ export default function WaterDispenserVisualizer({
                       Klik di sini atau Tekan Tombol D32 di ESP32 untuk {isPaused ? 'LANJUTKAN AIR' : 'MULAI KUCURKAN AIR'}
                     </span>
                   </button>
+                )}
+
+                {/* Tombol Selesaikan Lebih Awal & Indikator Auto-Timeout saat Jeda */}
+                {isPaused && (
+                  <div className="pt-2 space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleFinishEarly}
+                      disabled={isToggling}
+                      className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Selesaikan Pengisian Sekarang (Galon Penuh di {currentLiter.toFixed(1)}L)</span>
+                    </button>
+                    
+                    <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs font-medium flex items-center justify-center gap-1.5 text-center">
+                      <Clock className="w-3.5 h-3.5 shrink-0 animate-pulse text-amber-400" />
+                      <span>
+                        Auto-Timeout: Pesanan otomatis ditutup dalam <strong>{telemetry?.pauseRemaining ? `${telemetry.pauseRemaining} detik` : '60 detik'}</strong> jika tidak dilanjutkan.
+                      </span>
+                    </div>
+                  </div>
                 )}
 
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
