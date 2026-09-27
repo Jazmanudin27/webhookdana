@@ -1,424 +1,314 @@
-/*
-  ===========================================================================================
-  PROYEK   : DEPOT AIR ISI ULANG OTOMATIS - INTEGRASI DANA SANDBOX WEBHOOK
-  BOARD    : ESP32 Dev Module / NodeMCU-32S
-  DESKRIPSI: 
-    1. Polling ke Server Backend (HTTP GET /api/esp32/check-order) setiap 2 detik.
-    2. Saat status "PAID": Buka Solenoid Valve (GPIO 26) & Bunyikan Buzzer 1x (GPIO 19).
-    3. Baca Pulsa Water Flow Sensor (GPIO 18 - Interrupt) & hitung volume Liter real-time.
-    4. Kirim telemetri volume real-time setiap 1 detik saat pengisian.
-    5. Setelah targetLiter tercapai: Tutup Solenoid, Bunyikan Buzzer 4x, dan kirim 
-       notifikasi selesai (HTTP POST /api/esp32/finish-fill).
-    6. Tombol Darurat Manual (GPIO 4) untuk Emergency Stop seketika.
-  ===========================================================================================
-  PINOUT HARDWARE ESP32:
-    - Water Flow Sensor (YF-S201 Signal) : GPIO 18 (Interrupt)
-    - Relay Solenoid Valve (Aktif LOW)   : GPIO 26
-    - Active Buzzer                      : GPIO 19
-    - Tombol Emergency Stop (Active LOW) : GPIO 4 (Internal Pull-Up)
-    - Status LED Indikator               : GPIO 2 (Built-in LED)
-  ===========================================================================================
-  LIBRARY YANG DIBUTUHKAN (Install via Arduino Library Manager):
-    1. ArduinoJson (Versi 6.x atau 7.x) oleh Benoit Blanchon
-    2. WiFi (Built-in ESP32)
-    3. HTTPClient (Built-in ESP32)
-  ===========================================================================================
-*/
-
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
 // ==========================================================
-// 1. KONFIGURASI WIFI & SERVER BACKEND
+// 1. KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-const char* WIFI_SSID     = "NAMA_WIFI_ANDA";     // Ganti dengan SSID WiFi Anda
-const char* WIFI_PASSWORD = "PASSWORD_WIFI_ANDA"; // Ganti dengan Password WiFi Anda
+const char* WIFI_SSID     = "NAMA_WIFI_ANDA";     // Ganti dengan nama WiFi Anda
+const char* WIFI_PASSWORD = "PASSWORD_WIFI_ANDA"; // Ganti dengan password WiFi Anda
 
-// Domain Backend (Contoh: https://dana.aspartech.com atau IP LAN http://192.168.1.100:3000)
+// Domain Server Backend Anda
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
 // Endpoint API
-String urlCheckOrder  = String(BASE_SERVER_URL) + "/api/esp32/check-order";
-String urlFinishFill  = String(BASE_SERVER_URL) + "/api/esp32/finish-fill";
-String urlTelemetry   = String(BASE_SERVER_URL) + "/api/esp32/telemetry";
+String urlCheckOrder = String(BASE_SERVER_URL) + "/api/esp32/check-order";
+String urlFinishFill = String(BASE_SERVER_URL) + "/api/esp32/finish-fill";
+String urlTelemetry  = String(BASE_SERVER_URL) + "/api/esp32/telemetry";
 
 // ==========================================================
-// 2. DEFINISI PIN HARDWARE
+// 2. PENETAPAN PIN ESP32 (Sesuai Hardware Anda)
 // ==========================================================
-const int PIN_FLOW_SENSOR    = 18;  // Input Pulsa Water Flow Sensor YF-S201
-const int PIN_RELAY_SOLENOID = 26;  // Output Kontrol Relay Solenoid Valve
-const int PIN_BUZZER         = 19;  // Output Active Buzzer
-const int PIN_EMERGENCY_BTN  = 4;   // Input Tombol Emergency Stop (Pull-Up)
-const int PIN_LED_STATUS     = 2;   // Built-in LED ESP32
+const int RELAY_PIN       = 26; // Relay Solenoid Valve
+const int BLUE_LED_PIN    = 2;  // LED Indikator Status
+const int BUTTON_STOP_PIN = 4;  // Tombol Darurat (Stop/Pause)
+const int FLOW_SENSOR_PIN = 18; // Sinyal Kuning Sensor Water Flow
+const int BUZZER_PIN      = 19; // Sinyal (+) Buzzer
 
-// Logika Relay (Sebagian besar modul relay adalah Active LOW)
-#define RELAY_OPEN  LOW   // Solenoid Terbuka (Air Mengalir)
-#define RELAY_CLOSE HIGH  // Solenoid Tertutup (Air Berhenti)
-
-// ==========================================================
-// 3. KALIBRASI WATER FLOW SENSOR (YF-S201)
-// ==========================================================
-// Rumus umum YF-S201: Frekuensi (Hz) = 7.5 * Q (L/min)
-// 1 Liter ≈ 450 pulsa (bisa disesuaikan dengan pengujian ukur galon)
-float PULSES_PER_LITER = 450.0;
-
-// Variabel Global Sensor & Interrupt
-volatile unsigned long pulseCount = 0;
-unsigned long lastPulseTime = 0;
-
-// ISR (Interrupt Service Routine) untuk menghitung pulsa air
-void IRAM_ATTR pulseCounterISR() {
-  pulseCount++;
-}
+// Logika Relay (Sebagian besar modul Relay adalah Active LOW)
+const int RELAY_ON  = LOW;  // Jika relay Anda aktif HIGH, ganti jadi HIGH
+const int RELAY_OFF = HIGH; // Jika relay Anda aktif HIGH, ganti jadi LOW
 
 // ==========================================================
-// 4. VARIABEL STATUS SISTEM
+// 3. VARIABEL PROSES PENGISIAN AIR & SENSOR FLOW
 // ==========================================================
-enum SystemState {
-  STATE_IDLE,
-  STATE_FILLING,
-  STATE_COMPLETED,
-  STATE_EMERGENCY_STOP
-};
+bool isFilling = false;                 // Status apakah sedang mengisi air
+unsigned long currentFillMl = 0;       // Liter terisi pada transaksi SEKARANG (mL)
+unsigned long targetFillMl  = 0;       // Target liter transaksi (mL)
+unsigned long totalAccumulatedMl = 0;  // Total akumulasi seluruh transaksi (mL)
+String currentOrderId = "";            // ID Transaksi DANA yang sedang diproses
 
-SystemState currentState = STATE_IDLE;
+volatile byte pulseCount = 0;
+float flowRate = 0.0;                  // Debit (L/min)
+unsigned long oldTime = 0;
+const float calibrationFactor = 7.5;   // Faktor Kalibrasi Sensor YF-S201
 
-String currentOrderId      = "";
-float targetLiter          = 0.0;
-float currentDispensedLiter= 0.0;
-unsigned long fillStartTime= 0;
+// Polling interval ke server
 unsigned long lastPollTime = 0;
-unsigned long lastTelemetryTime = 0;
-const unsigned long POLL_INTERVAL = 2000; // Polling setiap 2000 ms (2 detik)
+const unsigned long POLL_INTERVAL = 2000; // Cek order baru tiap 2 detik
 
-// Debounce Tombol Darurat
-unsigned long lastBtnPressTime = 0;
-const unsigned long DEBOUNCE_DELAY = 250;
+// Debounce tombol
+unsigned long lastDebounceTime = 0;
+bool lastButtonState = HIGH;
 
 // ==========================================================
-// 5. HELPER FUNCTION: SUARA BUZZER
+// 4. INTERRUPT SERVICE ROUTINE (ISR)
 // ==========================================================
-void beepBuzzer(int count, int durationMs = 150, int pauseMs = 100) {
-  for (int i = 0; i < count; i++) {
-    digitalWrite(PIN_BUZZER, HIGH);
-    delay(durationMs);
-    digitalWrite(PIN_BUZZER, LOW);
-    if (i < count - 1) {
-      delay(pauseMs);
+void IRAM_ATTR pulseCounter() {
+    pulseCount++;
+}
+
+// ==========================================================
+// 5. NADA BUZZER
+// ==========================================================
+void triggerBuzzer(int beepCount, int durationMs = 80, int pauseMs = 80) {
+    for (int i = 0; i < beepCount; i++) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(durationMs);
+        digitalWrite(BUZZER_PIN, LOW);
+        if (i < beepCount - 1) delay(pauseMs);
     }
-  }
-}
-
-// Bunyi nada khusus Emergency
-void emergencyAlarm() {
-  for (int i = 0; i < 6; i++) {
-    digitalWrite(PIN_BUZZER, HIGH);
-    digitalWrite(PIN_LED_STATUS, HIGH);
-    delay(80);
-    digitalWrite(PIN_BUZZER, LOW);
-    digitalWrite(PIN_LED_STATUS, LOW);
-    delay(60);
-  }
 }
 
 // ==========================================================
-// 6. SETUP & INISIALISASI
+// 6. FUNGSI MEMULAI PENGISIAN
 // ==========================================================
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("\n========================================================");
-  Serial.println("💧 ESP32 DEPOT AIR ISI ULANG - WEBHOOK DANA SANDBOX");
-  Serial.println("========================================================");
-
-  // Inisialisasi Pin
-  pinMode(PIN_RELAY_SOLENOID, OUTPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
-  pinMode(PIN_LED_STATUS, OUTPUT);
-  pinMode(PIN_FLOW_SENSOR, INPUT_PULLUP);
-  pinMode(PIN_EMERGENCY_BTN, INPUT_PULLUP);
-
-  // Pastikan Solenoid tertutup & Buzzer mati saat booting
-  digitalWrite(PIN_RELAY_SOLENOID, RELAY_CLOSE);
-  digitalWrite(PIN_BUZZER, LOW);
-  digitalWrite(PIN_LED_STATUS, LOW);
-
-  // Pasang Interrupt pada Sensor Water Flow
-  attachInterrupt(digitalPinToInterrupt(PIN_FLOW_SENSOR), pulseCounterISR, RISING);
-
-  // Bunyi 2x beep tanda sistem menyala
-  beepBuzzer(2, 100, 100);
-
-  // Hubungkan ke WiFi
-  connectToWiFi();
-}
-
-// ==========================================================
-// 7. KONEKSI KE WIFI
-// ==========================================================
-void connectToWiFi() {
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(WIFI_SSID);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-    delay(500);
-    Serial.print(".");
-    digitalWrite(PIN_LED_STATUS, !digitalRead(PIN_LED_STATUS)); // Blink LED
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ WiFi Terhubung!");
-    Serial.print("IP Address ESP32: ");
-    Serial.println(WiFi.localIP());
-    digitalWrite(PIN_LED_STATUS, HIGH);
-    beepBuzzer(1, 300); // Beep panjang tanda online
-  } else {
-    Serial.println("\n❌ Gagal terhubung ke WiFi! Cek SSID/Password.");
-    digitalWrite(PIN_LED_STATUS, LOW);
-  }
-}
-
-// ==========================================================
-// 8. FUNGSI HTTP: CHECK ORDER (/api/esp32/check-order)
-// ==========================================================
-void checkOrderFromServer() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️ WiFi terputus, mencoba reconnect...");
-    WiFi.reconnect();
-    return;
-  }
-
-  HTTPClient http;
-  http.begin(urlCheckOrder);
-  http.setTimeout(4000);
-
-  int httpCode = http.GET();
-
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
+void startFilling(String orderId, float targetLiters) {
+    currentOrderId = orderId;
+    targetFillMl = (unsigned long)(targetLiters * 1000.0);
+    currentFillMl = 0;
+    isFilling = true;
     
-    // Parsing JSON Respons
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, payload);
+    digitalWrite(RELAY_PIN, RELAY_ON);
+    digitalWrite(BLUE_LED_PIN, HIGH);
+    
+    Serial.println("\n==========================================");
+    Serial.print("🚰 MEMULAI PENGISIAN AIR: "); 
+    Serial.print(targetLiters); 
+    Serial.println(" Liter");
+    Serial.print("📦 Order ID: ");
+    Serial.println(orderId);
+    Serial.println("==========================================");
+    
+    triggerBuzzer(1, 250); // Bip 1x tanda mulai
+}
 
-    if (!error) {
-      const char* status = doc["status"];
-      
-      // Jika status pesanan adalah PAID
-      if (status && strcmp(status, "PAID") == 0) {
-        currentOrderId = doc["orderId"].as<String>();
-        targetLiter    = doc["targetLiter"].as<float>();
-        
-        Serial.println("\n🎉 [TRANSAKSI BARU DITERIMA]");
-        Serial.print("Order ID    : "); Serial.println(currentOrderId);
-        Serial.print("Target Liter: "); Serial.print(targetLiter); Serial.println(" Liter");
-
-        startFillingWater();
-      }
-    } else {
-      Serial.print("JSON Parsing error: ");
-      Serial.println(error.c_str());
+// ==========================================================
+// 7. FUNGSI MENGIRIM STATUS SELESAI KE SERVER
+// ==========================================================
+void notifyServerFinished(bool isFinishedSuccess) {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi terputus saat kirim laporan selesai!");
+        return;
     }
-  } else {
-    Serial.printf("HTTP Check Order gagal, error code: %d\n", httpCode);
-  }
 
-  http.end();
+    HTTPClient http;
+    http.begin(urlFinishFill);
+    http.addHeader("Content-Type", "application/json");
+
+    StaticJsonDocument<256> doc;
+    doc["orderId"]         = currentOrderId;
+    doc["dispensedLiter"]  = (float)currentFillMl / 1000.0;
+    doc["status"]          = isFinishedSuccess ? "COMPLETED" : "EMERGENCY_STOP";
+
+    String jsonBody;
+    serializeJson(doc, jsonBody);
+
+    Serial.print("📤 Mengirim konfirmasi ke server: ");
+    Serial.println(jsonBody);
+
+    int httpCode = http.POST(jsonBody);
+    if (httpCode > 0) {
+        Serial.printf("✅ Server merespons code: %d\n", httpCode);
+    } else {
+        Serial.printf("❌ Gagal kirim ke server, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+    http.end();
 }
 
 // ==========================================================
-// 9. FUNGSI MEMULAI PENGISIAN AIR
-// ==========================================================
-void startFillingWater() {
-  currentState = STATE_FILLING;
-  
-  // Reset penghitung pulsa
-  noInterrupts();
-  pulseCount = 0;
-  interrupts();
-
-  currentDispensedLiter = 0.0;
-  fillStartTime = millis();
-
-  // 1. Bunyikan Buzzer 1x konfirmasi mulai
-  beepBuzzer(1, 400);
-
-  // 2. Buka Solenoid Valve (Relay ON)
-  digitalWrite(PIN_RELAY_SOLENOID, RELAY_OPEN);
-  digitalWrite(PIN_LED_STATUS, HIGH);
-
-  Serial.println("🚰 Solenoid Valve DIBUKA! Memulai pengisian air...");
-}
-
-// ==========================================================
-// 10. FUNGSI HTTP: FINISH FILL (/api/esp32/finish-fill)
-// ==========================================================
-void sendFinishFillToServer(String finishStatus) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi offline saat kirim finish, reconnecting...");
-    WiFi.reconnect();
-  }
-
-  HTTPClient http;
-  http.begin(urlFinishFill);
-  http.addHeader("Content-Type", "application/json");
-
-  // Siapkan Payload JSON
-  StaticJsonDocument<256> doc;
-  doc["orderId"]         = currentOrderId;
-  doc["dispensedLiter"]  = currentDispensedLiter;
-  doc["durationSeconds"] = (millis() - fillStartTime) / 1000;
-  doc["status"]          = finishStatus; // "COMPLETED" atau "EMERGENCY_STOP"
-
-  String requestBody;
-  serializeJson(doc, requestBody);
-
-  Serial.print("📤 Mengirim notifikasi selesai ke server: ");
-  Serial.println(requestBody);
-
-  int httpCode = http.POST(requestBody);
-  if (httpCode == HTTP_CODE_OK || httpCode == 201) {
-    Serial.println("✅ Server mereset status depot ke IDLE.");
-  } else {
-    Serial.printf("❌ Gagal kirim finish-fill, code: %d\n", httpCode);
-  }
-
-  http.end();
-}
-
-// ==========================================================
-// 11. FUNGSI TELEMETRI REAL-TIME (/api/esp32/telemetry)
+// 8. FUNGSI MENGIRIM TELEMETRI REAL-TIME (LITER LIVE)
 // ==========================================================
 void sendLiveTelemetry() {
-  if (WiFi.status() != WL_CONNECTED) return;
+    if (WiFi.status() != WL_CONNECTED || !isFilling) return;
 
-  HTTPClient http;
-  http.begin(urlTelemetry);
-  http.addHeader("Content-Type", "application/json");
+    HTTPClient http;
+    http.begin(urlTelemetry);
+    http.addHeader("Content-Type", "application/json");
 
-  StaticJsonDocument<256> doc;
-  doc["orderId"]      = currentOrderId;
-  doc["currentLiter"] = currentDispensedLiter;
-  doc["pulses"]       = pulseCount;
-  doc["flowRate"]     = 0; // opsional
+    StaticJsonDocument<200> doc;
+    doc["orderId"]      = currentOrderId;
+    doc["currentLiter"] = (float)currentFillMl / 1000.0;
+    doc["flowRate"]     = flowRate;
 
-  String body;
-  serializeJson(doc, body);
+    String jsonBody;
+    serializeJson(doc, jsonBody);
 
-  http.POST(body);
-  http.end();
+    http.POST(jsonBody);
+    http.end();
 }
 
 // ==========================================================
-// 12. FUNGSI DARURAT (EMERGENCY STOP)
+// 9. FUNGSI MENGHENTIKAN PENGISIAN
 // ==========================================================
-void handleEmergencyStop() {
-  Serial.println("\n🚨 [EMERGENCY STOP DIAKTIFKAN!]");
-  
-  // Matikan Solenoid seketika
-  digitalWrite(PIN_RELAY_SOLENOID, RELAY_CLOSE);
-  currentState = STATE_IDLE;
-
-  // Bunyikan alarm darurat
-  emergencyAlarm();
-
-  // Kirim laporan darurat ke server
-  sendFinishFillToServer("EMERGENCY_STOP");
-
-  // Reset variabel
-  currentOrderId = "";
-  targetLiter = 0.0;
-  currentDispensedLiter = 0.0;
-}
-
-// ==========================================================
-// 13. PROSES PENGISIAN & MONITORING LITER
-// ==========================================================
-void processFilling() {
-  // Ambil data pulsa secara aman dari ISR
-  unsigned long currentPulses;
-  noInterrupts();
-  currentPulses = pulseCount;
-  interrupts();
-
-  // Konversi pulsa ke Liter
-  currentDispensedLiter = (float)currentPulses / PULSES_PER_LITER;
-
-  // Print progress ke Serial Monitor setiap 500ms
-  static unsigned long lastSerialPrint = 0;
-  if (millis() - lastSerialPrint > 500) {
-    lastSerialPrint = millis();
-    Serial.printf("⏳ Mengisi... [%.2f / %.2f Liter] (Pulsa: %lu)\n", 
-                  currentDispensedLiter, targetLiter, currentPulses);
-  }
-
-  // Kirim telemetri ke server setiap 1000ms (1 detik)
-  if (millis() - lastTelemetryTime > 1000) {
-    lastTelemetryTime = millis();
-    sendLiveTelemetry();
-  }
-
-  // Cek apakah target liter sudah tercapai
-  if (currentDispensedLiter >= targetLiter) {
-    Serial.println("\n✅ TARGET LITER TERCAPAI!");
+void stopFilling(bool isFinishedSuccess = true) {
+    isFilling = false;
+    digitalWrite(RELAY_PIN, RELAY_OFF);
+    digitalWrite(BLUE_LED_PIN, LOW);
     
-    // 1. Tutup Solenoid Valve Seketika
-    digitalWrite(PIN_RELAY_SOLENOID, RELAY_CLOSE);
-    digitalWrite(PIN_LED_STATUS, LOW);
+    if (isFinishedSuccess) {
+        Serial.println("\n🎉 --> PENGISIAN SELESAI OTOMATIS!");
+        triggerBuzzer(4, 120, 80); // Bip 4x cepat tanda sukses selesai!
+        notifyServerFinished(true);
+    } else {
+        Serial.println("\n🚨 --> PENGISIAN DIHENTIKAN MANUAL / EMERGENCY!");
+        triggerBuzzer(2, 350, 100); // Bip panjang 2x tanda stop
+        notifyServerFinished(false);
+    }
 
-    // 2. Bunyikan Buzzer 4x tanda pengisian selesai
-    Serial.println("🔊 Membunyikan Buzzer 4x...");
-    beepBuzzer(4, 180, 120);
-
-    // 3. Kirim konfirmasi selesai ke server
-    sendFinishFillToServer("COMPLETED");
-
-    // 4. Kembalikan state ke IDLE
-    currentState = STATE_IDLE;
     currentOrderId = "";
-    targetLiter = 0.0;
-    currentDispensedLiter = 0.0;
-    Serial.println("💤 Sistem kembali ke status IDLE. Siap melayani pesanan berikutnya.\n");
-  }
+    targetFillMl = 0;
+    currentFillMl = 0;
 }
 
 // ==========================================================
-// 14. MAIN LOOP
+// 10. FUNGSI POLLING KE SERVER (/api/esp32/check-order)
+// ==========================================================
+void checkOrderFromServer() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("⚠️ WiFi terputus, mencoba koneksi ulang...");
+        WiFi.reconnect();
+        return;
+    }
+
+    HTTPClient http;
+    http.begin(urlCheckOrder);
+    http.setTimeout(3500);
+
+    int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (!error) {
+            const char* status = doc["status"];
+            
+            // Jika ada pembayaran DANA yang sukses masuk (status == PAID)
+            if (status && strcmp(status, "PAID") == 0) {
+                String orderId = doc["orderId"].as<String>();
+                float targetLiters = doc["targetLiter"].as<float>();
+
+                // Mulai mengalirkan air sesuai pesanan
+                startFilling(orderId, targetLiters);
+            }
+        }
+    }
+    http.end();
+}
+
+// ==========================================================
+// 11. SETUP
+// ==========================================================
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+
+    Serial.println("\n=================================================");
+    Serial.println("💧 ESP32 DEPOT AIR OTOMATIS - DANA.ASPARTECH.COM");
+    Serial.println("=================================================");
+
+    pinMode(RELAY_PIN, OUTPUT);
+    pinMode(BLUE_LED_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
+    pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+
+    digitalWrite(RELAY_PIN, RELAY_OFF);
+    digitalWrite(BLUE_LED_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+
+    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+
+    // Hubungkan ke WiFi Internet
+    Serial.print("Menghubungkan ke WiFi: ");
+    Serial.println(WIFI_SSID);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    int count = 0;
+    while (WiFi.status() != WL_CONNECTED && count < 30) {
+        delay(500);
+        Serial.print(".");
+        digitalWrite(BLUE_LED_PIN, !digitalRead(BLUE_LED_PIN)); // Blink saat connecting
+        count++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\n✅ WiFi Terhubung!");
+        Serial.print("IP ESP32: "); Serial.println(WiFi.localIP());
+        digitalWrite(BLUE_LED_PIN, HIGH);
+        triggerBuzzer(2, 80, 80); // Bip 2x tanda online
+    } else {
+        Serial.println("\n❌ Gagal konek WiFi! Periksa SSID & Password.");
+    }
+}
+
+// ==========================================================
+// 12. LOOP UTAMA
 // ==========================================================
 void loop() {
-  // 1. Cek Tombol Emergency Stop (Active LOW)
-  if (digitalRead(PIN_EMERGENCY_BTN) == LOW) {
-    if (millis() - lastBtnPressTime > DEBOUNCE_DELAY) {
-      lastBtnPressTime = millis();
-      if (currentState == STATE_FILLING) {
-        handleEmergencyStop();
-      }
+    // --- 1. POLLING SERVER DANA SETIAP 2 DETIK (JIKA SEDANG TIDAK MENGISI) ---
+    if (!isFilling) {
+        if (millis() - lastPollTime >= POLL_INTERVAL) {
+            lastPollTime = millis();
+            checkOrderFromServer();
+        }
     }
-  }
 
-  // 2. State Machine Execution
-  switch (currentState) {
-    case STATE_IDLE:
-      // Polling server setiap 2 detik
-      if (millis() - lastPollTime >= POLL_INTERVAL) {
-        lastPollTime = millis();
-        checkOrderFromServer();
-      }
-      break;
+    // --- 2. PROSES HITUNGAN VOLUME AIR & SENSOR FLOW SETIAP 1 DETIK ---
+    if ((millis() - oldTime) > 1000) {
+        detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
+        
+        flowRate = ((1000.0 / (millis() - oldTime)) * pulseCount) / calibrationFactor;
+        oldTime = millis();
+        
+        // Hitung mililiter air yang mengalir dalam 1 detik ini
+        unsigned int mlThisSecond = (flowRate / 60.0) * 1000;
+        
+        if (isFilling) {
+            currentFillMl += mlThisSecond;
+            totalAccumulatedMl += mlThisSecond;
 
-    case STATE_FILLING:
-      // Hitung volume dan kendalikan pengisian air
-      processFilling();
-      break;
+            Serial.printf("⏳ Mengisi... [%.2f / %.2f Liter] - Debit: %.1f L/min\n", 
+                          (float)currentFillMl / 1000.0, 
+                          (float)targetFillMl / 1000.0, 
+                          flowRate);
 
-    default:
-      currentState = STATE_IDLE;
-      break;
-  }
+            // Kirim telemetri live ke dashboard web
+            sendLiveTelemetry();
+
+            // CEK OTO-STOP: Apakah air terisi sudah mencapai target?
+            if (currentFillMl >= targetFillMl) {
+                stopFilling(true); // Selesai otomatis!
+            }
+        }
+        
+        pulseCount = 0;
+        attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+    }
+
+    // --- 3. TOMBOL DARURAT (MANUAL STOP) ---
+    int btnRead = digitalRead(BUTTON_STOP_PIN);
+    if (btnRead == LOW && lastButtonState == HIGH) {
+        if (millis() - lastDebounceTime > 250) {
+            if (isFilling) {
+                stopFilling(false); // Hentikan pengisian jika sedang berjalan
+            }
+            lastDebounceTime = millis();
+        }
+    }
+    lastButtonState = btnRead;
 }
