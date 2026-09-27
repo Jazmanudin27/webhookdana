@@ -16,6 +16,8 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <WebServer.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 Preferences preferences;
 WiFiClientSecure secureClient;
@@ -129,10 +131,13 @@ bool connectToWiFi(int timeoutSeconds = 20) {
     Serial.println("-------------------------------------------------");
 
     WiFi.disconnect(true);
-    delay(500);
+    delay(400);
 
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
+    WiFi.setTxPower(WIFI_POWER_15dBm); // Mengurangi lonjakan arus RF agar tidak brownout/restart saat pakai daya USB
+    WiFi.setAutoReconnect(true);
+
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
     unsigned long startAttemptTime = millis();
@@ -347,6 +352,9 @@ void checkOrderFromServer() {
 // 9. SETUP
 // ==========================================================
 void setup() {
+    // 1. Nonaktifkan Brownout Detector agar ESP32 tidak restart saat transmisi WiFi menyala di daya USB
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
     Serial.begin(115200);
     delay(1000);
 
