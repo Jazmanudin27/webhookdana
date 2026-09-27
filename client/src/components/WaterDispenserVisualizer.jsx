@@ -52,48 +52,48 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
   return (
     <div className={`rounded-3xl p-6 sm:p-7 relative overflow-hidden transition-all duration-500 ${
       isFilling 
-        ? 'glass-card-glow border-cyan-500/40 shadow-2xl shadow-cyan-950/50' 
+        ? 'glass-card-glow border-cyan-400/50 shadow-2xl shadow-cyan-950/60' 
         : isPaid 
-        ? 'glass-card-emerald' 
-        : 'glass-card'
+        ? 'glass-card-emerald border-cyan-500/40' 
+        : 'glass-card border-sky-500/30'
     }`}>
-      {/* Dynamic Ambient Background Glows */}
+      {/* Dynamic Ambient Background Aquatic Glows */}
       <div className={`absolute -top-32 -left-32 w-80 h-80 rounded-full blur-[100px] pointer-events-none transition-all duration-1000 ${
-        isFilling ? 'bg-cyan-500/25' : isPaid ? 'bg-emerald-500/20' : 'bg-blue-600/10'
+        isFilling ? 'bg-cyan-500/30' : isPaid ? 'bg-sky-400/25' : 'bg-blue-600/20'
       }`} />
       <div className={`absolute -bottom-32 -right-32 w-80 h-80 rounded-full blur-[100px] pointer-events-none transition-all duration-1000 ${
-        isFilling ? 'bg-blue-500/25' : isPaid ? 'bg-cyan-500/20' : 'bg-purple-600/10'
+        isFilling ? 'bg-blue-500/30' : isPaid ? 'bg-cyan-500/25' : 'bg-sky-600/20'
       }`} />
 
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-5 border-b border-slate-800/80 relative z-10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-5 border-b border-sky-500/20 relative z-10">
         <div className="flex items-center gap-3.5">
           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500 ${
             isFilling 
-              ? 'bg-gradient-to-tr from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/40 animate-pulse' 
+              ? 'bg-gradient-to-tr from-cyan-400 via-blue-500 to-sky-300 text-white shadow-lg shadow-cyan-500/40 animate-pulse' 
               : isPaid 
-              ? 'bg-gradient-to-tr from-emerald-500 to-teal-400 text-white shadow-lg shadow-emerald-500/30' 
-              : 'bg-slate-900 border border-slate-800 text-slate-400'
+              ? 'bg-gradient-to-tr from-sky-500 to-teal-400 text-white shadow-lg shadow-sky-500/30' 
+              : 'bg-[#06244d] border border-sky-500/30 text-sky-300'
           }`}>
-            <Droplet className="w-6 h-6" />
+            <Droplet className="w-6 h-6 fill-current" />
           </div>
           <div>
             <div className="flex items-center gap-2.5">
-              <h2 className="text-xl font-extrabold text-white tracking-tight">
+              <h2 className="text-xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-sky-100 to-cyan-300 tracking-tight">
                 Smart Water Dispenser
               </h2>
               <span className={`text-[11px] px-3 py-1 rounded-full font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${
                 isFilling 
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 shadow-sm shadow-cyan-500/30' 
                   : isPaid 
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse' 
-                  : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  ? 'bg-sky-500/20 text-sky-200 border border-sky-400/50 animate-pulse' 
+                  : 'bg-[#062042] text-sky-300 border border-sky-500/30'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isFilling ? 'bg-cyan-400 animate-ping' : isPaid ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${isFilling ? 'bg-cyan-400 animate-ping' : isPaid ? 'bg-emerald-400' : 'bg-sky-400'}`} />
                 {systemState?.status || 'IDLE'}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-sky-200/70 mt-0.5">
               ESP32 Solenoid (GPIO 26) • Flow Sensor (GPIO 34) • Tombol Kucur Air (GPIO 32)
             </p>
           </div>
@@ -119,24 +119,24 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
           
           {/* Top Dispenser Nozzle / Faucet */}
           <div className="relative flex flex-col items-center">
-            <div className="w-16 h-3 bg-gradient-to-r from-slate-700 via-slate-500 to-slate-700 rounded-t-md shadow-md" />
-            <div className="w-6 h-4 bg-slate-600 border-x border-slate-500 relative flex items-center justify-center">
+            <div className="w-16 h-3 bg-gradient-to-r from-slate-600 via-sky-400 to-slate-600 rounded-t-md shadow-md" />
+            <div className="w-6 h-4 bg-slate-600 border-x border-sky-400/50 relative flex items-center justify-center">
               {isFilling && (
                 <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
               )}
             </div>
             {/* Water Stream Nozzle Effect */}
             {isFilling && (
-              <div className="w-2 h-7 bg-gradient-to-b from-cyan-300 via-blue-400 to-cyan-200 animate-pulse shadow-[0_0_12px_rgba(56,189,248,0.8)] z-20" />
+              <div className="w-2 h-7 bg-gradient-to-b from-cyan-200 via-sky-400 to-cyan-300 animate-pulse shadow-[0_0_15px_rgba(56,189,248,1)] z-20" />
             )}
           </div>
 
           {/* Main 3D Water Tank Body */}
-          <div className="relative w-56 h-72 bg-gradient-to-b from-slate-900/90 to-slate-950/95 rounded-[32px] border-4 border-slate-700/80 p-2 shadow-2xl flex flex-col justify-end overflow-hidden backdrop-blur-md">
+          <div className="relative w-56 h-72 bg-gradient-to-b from-[#06244c]/90 via-[#031b3b]/95 to-[#021226]/98 rounded-[32px] border-4 border-cyan-400/40 p-2 shadow-2xl shadow-cyan-950/70 flex flex-col justify-end overflow-hidden backdrop-blur-md">
             
             {/* Glossy Glass Reflection Overlay */}
-            <div className="absolute top-0 left-3 w-6 h-full bg-gradient-to-r from-white/10 to-transparent pointer-events-none z-30 rounded-l-2xl" />
-            <div className="absolute top-0 right-3 w-3 h-full bg-gradient-to-l from-white/5 to-transparent pointer-events-none z-30 rounded-r-2xl" />
+            <div className="absolute top-0 left-3 w-6 h-full bg-gradient-to-r from-white/15 to-transparent pointer-events-none z-30 rounded-l-2xl" />
+            <div className="absolute top-0 right-3 w-3 h-full bg-gradient-to-l from-white/10 to-transparent pointer-events-none z-30 rounded-r-2xl" />
 
             {/* Scale Measurement Hash Lines */}
             <div className="absolute right-3 top-6 bottom-6 flex flex-col justify-between text-[10px] font-mono text-slate-500 z-20 pointer-events-none select-none">
@@ -175,13 +175,13 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
 
             {/* Center Digital Display */}
             <div className="absolute inset-0 flex flex-col items-center justify-center z-30 pointer-events-none">
-              <div className="bg-slate-950/85 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-800 shadow-2xl flex flex-col items-center">
-                <div className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400 font-mono tracking-tight">
-                  {currentLiter.toFixed(1)} <span className="text-xs font-semibold text-slate-400 font-sans">/ {targetLiter} L</span>
+              <div className="bg-[#031735]/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-cyan-400/40 shadow-2xl flex flex-col items-center">
+                <div className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 via-sky-300 to-blue-300 font-mono tracking-tight">
+                  {currentLiter.toFixed(1)} <span className="text-xs font-semibold text-sky-300/80 font-sans">/ {targetLiter} L</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                  <span className="text-[11px] font-extrabold text-cyan-200 font-mono">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-sm shadow-cyan-400" />
+                  <span className="text-[11px] font-extrabold text-cyan-200 font-mono tracking-wide">
                     {percentage}% TERISI
                   </span>
                 </div>
@@ -189,8 +189,8 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
             </div>
           </div>
 
-          <div className="text-xs font-semibold text-slate-400 mt-3 font-mono bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
-            📦 {systemState?.activeOrder?.title || 'Galon 19 Liter'}
+          <div className="text-xs font-semibold text-sky-200 mt-3 font-mono bg-[#052042]/90 px-3.5 py-1 rounded-full border border-sky-500/30 shadow-sm">
+            💧 {systemState?.activeOrder?.title || 'Galon 19 Liter'}
           </div>
         </div>
 
@@ -201,8 +201,8 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
           {(systemState?.activeOrder || isPaid || isFilling || isPaused) ? (
             <div className={`p-5 rounded-2xl border space-y-3 shadow-2xl relative overflow-hidden transition-all duration-300 ${
               isFilling 
-                ? 'bg-gradient-to-r from-slate-900 via-emerald-950/30 to-slate-900 border-emerald-500/40' 
-                : 'bg-gradient-to-r from-slate-900 via-rose-950/30 to-slate-900 border-rose-500/40'
+                ? 'bg-gradient-to-r from-[#06294d] via-emerald-950/30 to-[#041c38] border-emerald-500/40 shadow-emerald-950/40' 
+                : 'bg-gradient-to-r from-[#06294d] via-rose-950/30 to-[#041c38] border-rose-500/40 shadow-rose-950/40'
             }`}>
               <div className={`absolute top-0 right-0 w-36 h-36 rounded-full blur-2xl pointer-events-none ${
                 isFilling ? 'bg-emerald-500/15' : 'bg-rose-500/15'
@@ -214,7 +214,7 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
                 }`}>
                   <Sparkles className="w-3.5 h-3.5" /> Transaksi Sedang Berjalan
                 </span>
-                <span className="text-[11px] font-mono text-slate-300 bg-slate-950 px-2.5 py-0.5 rounded-lg border border-slate-800">
+                <span className="text-[11px] font-mono text-sky-200 bg-[#03152d] px-2.5 py-0.5 rounded-lg border border-sky-500/30">
                   {systemState?.activeOrder?.orderId || 'DANA-ACTIVE'}
                 </span>
               </div>
@@ -228,7 +228,7 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
                 </span>
               </div>
 
-              <div className="text-xs text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
+              <div className="text-xs text-sky-200/70 flex items-center justify-between pt-2 border-t border-sky-500/20">
                 <span>Pelanggan: <strong className="text-white">{systemState?.activeOrder?.customerName || 'Pelanggan Depot'}</strong></span>
                 <span>Waktu Bayar: <strong className="text-cyan-300 font-mono">{new Date(systemState?.activeOrder?.paidAt || Date.now()).toLocaleTimeString('id-ID')}</strong></span>
               </div>
@@ -271,18 +271,18 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
                   </button>
                 )}
 
-                <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
+                <div className="flex items-center justify-between text-[11px] text-sky-200/70 mt-2 px-1">
                   <span>💡 Lampu Tombol Fisik: <strong className="text-rose-400">D21 (Merah)</strong> • <strong className="text-emerald-400">D22 (Hijau)</strong></span>
-                  <span>🔘 Tombol Push: <strong className="text-cyan-400 font-mono">GPIO 32</strong></span>
+                  <span>🔘 Tombol Push: <strong className="text-cyan-300 font-mono">GPIO 32</strong></span>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 text-center py-7">
-              <p className="text-sm font-medium text-slate-300">
-                Depot dalam keadaan <strong className="text-cyan-400 font-bold">STANDBY (IDLE)</strong>
+            <div className="bg-[#051f40]/70 p-5 rounded-2xl border border-sky-500/30 text-center py-7 shadow-lg shadow-sky-950/30">
+              <p className="text-sm font-medium text-sky-100">
+                Depot dalam keadaan <strong className="text-cyan-300 font-bold">STANDBY (IDLE)</strong>
               </p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-sky-300/70 mt-1">
                 Pilih paket di panel samping atau scan QRIS DANA Sandbox untuk memulai.
               </p>
             </div>
@@ -293,60 +293,60 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
             {/* Card 1: Solenoid Valve */}
             <div className={`p-4 rounded-2xl border transition-all ${
               isFilling 
-                ? 'bg-cyan-950/40 border-cyan-500/60 shadow-lg shadow-cyan-950/50' 
-                : 'bg-slate-900/60 border-slate-800'
+                ? 'bg-cyan-950/60 border-cyan-400/70 shadow-lg shadow-cyan-950/50' 
+                : 'bg-[#06244d]/70 border-sky-500/30'
             }`}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-bold text-slate-400">Solenoid Valve</span>
-                <Zap className={`w-4 h-4 ${isFilling ? 'text-cyan-400 animate-pulse' : 'text-slate-600'}`} />
+                <span className="text-[11px] font-bold text-sky-200/80">Solenoid Valve</span>
+                <Zap className={`w-4 h-4 ${isFilling ? 'text-cyan-300 animate-pulse' : 'text-sky-500/60'}`} />
               </div>
               <div className="flex items-center gap-2">
-                <div className={`w-2.5 h-2.5 rounded-full ${isFilling ? 'bg-cyan-400 animate-ping' : 'bg-slate-600'}`} />
-                <span className={`text-sm font-black font-mono tracking-wide ${isFilling ? 'text-cyan-300' : 'text-slate-400'}`}>
+                <div className={`w-2.5 h-2.5 rounded-full ${isFilling ? 'bg-cyan-400 animate-ping' : 'bg-sky-600'}`} />
+                <span className={`text-sm font-black font-mono tracking-wide ${isFilling ? 'text-cyan-300' : 'text-sky-300'}`}>
                   {isFilling ? 'TERBUKA' : 'TERTUTUP'}
                 </span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono mt-1 block">GPIO 26 (Relay)</span>
+              <span className="text-[10px] text-sky-400/60 font-mono mt-1 block">GPIO 26 (Relay)</span>
             </div>
 
             {/* Card 2: Flow Sensor */}
             <div className={`p-4 rounded-2xl border transition-all ${
               isFilling 
-                ? 'bg-blue-950/40 border-blue-500/60 shadow-lg shadow-blue-950/50' 
-                : 'bg-slate-900/60 border-slate-800'
+                ? 'bg-blue-950/60 border-blue-400/70 shadow-lg shadow-blue-950/50' 
+                : 'bg-[#06244d]/70 border-sky-500/30'
             }`}>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-bold text-slate-400">Flow Sensor</span>
-                <Gauge className={`w-4 h-4 ${isFilling ? 'text-blue-400 animate-spin' : 'text-slate-600'}`} />
+                <span className="text-[11px] font-bold text-sky-200/80">Flow Sensor</span>
+                <Gauge className={`w-4 h-4 ${isFilling ? 'text-sky-300 animate-spin' : 'text-sky-500/60'}`} />
               </div>
               <div className="text-sm font-black font-mono text-white">
-                {telemetry?.flowRate ? telemetry.flowRate.toFixed(1) : (isFilling ? '4.8' : '0.0')} <span className="text-[10px] text-slate-400 font-normal">L/min</span>
+                {telemetry?.flowRate ? telemetry.flowRate.toFixed(1) : (isFilling ? '4.8' : '0.0')} <span className="text-[10px] text-sky-300/70 font-normal">L/min</span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono mt-1 block">GPIO 34 (YF-S201)</span>
+              <span className="text-[10px] text-sky-400/60 font-mono mt-1 block">GPIO 34 (YF-S201)</span>
             </div>
 
             {/* Card 3: Buzzer Alert */}
-            <div className="p-4 rounded-2xl border bg-slate-900/60 border-slate-800">
+            <div className="p-4 rounded-2xl border bg-[#06244d]/70 border-sky-500/30">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-bold text-slate-400">Audio Buzzer</span>
-                <Volume2 className={`w-4 h-4 ${isFilling ? 'text-emerald-400' : 'text-slate-600'}`} />
+                <span className="text-[11px] font-bold text-sky-200/80">Audio Buzzer</span>
+                <Volume2 className={`w-4 h-4 ${isFilling ? 'text-cyan-400' : 'text-sky-500/60'}`} />
               </div>
-              <div className="text-sm font-black font-mono text-slate-200">
+              <div className="text-sm font-black font-mono text-sky-100">
                 {isFilling ? '1x Mulai' : percentage >= 100 ? '4x Selesai' : 'Standby'}
               </div>
-              <span className="text-[10px] text-slate-500 font-mono mt-1 block">GPIO 19</span>
+              <span className="text-[10px] text-sky-400/60 font-mono mt-1 block">GPIO 19</span>
             </div>
           </div>
 
           {/* Polling Health bar */}
-          <div className="bg-slate-950/80 px-4 py-3 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+          <div className="bg-[#03152d]/90 px-4 py-3 rounded-2xl border border-sky-500/30 flex items-center justify-between text-xs shadow-sm">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${systemState?.esp32Status === 'ONLINE' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-              <span className="text-slate-300 font-medium">
-                Koneksi Polling ESP32: <strong className="text-cyan-400 font-mono">/api/esp32/check-order</strong>
+              <span className="text-sky-200 font-medium">
+                Koneksi Polling ESP32: <strong className="text-cyan-300 font-mono">/api/esp32/check-order</strong>
               </span>
             </div>
-            <span className="text-slate-400 font-mono text-[11px]">
+            <span className="text-sky-300/80 font-mono text-[11px]">
               IP: {systemState?.esp32Ip || 'Offline'}
             </span>
           </div>

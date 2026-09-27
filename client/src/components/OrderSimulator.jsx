@@ -96,23 +96,23 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
   };
 
   return (
-    <div className="glass-card rounded-3xl p-6 sm:p-7 border border-slate-800 flex flex-col h-full relative overflow-hidden">
+    <div className="glass-card rounded-3xl p-6 sm:p-7 border border-sky-500/25 flex flex-col h-full relative overflow-hidden">
       {/* Background Subtle Gradient */}
-      <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800/80 relative z-10">
+      <div className="flex items-center justify-between mb-5 pb-4 border-b border-sky-500/20 relative z-10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#0284c7] via-[#0ea5e9] to-cyan-300 flex items-center justify-center text-white shadow-lg shadow-sky-500/30 ring-2 ring-cyan-400/30">
             <CreditCard className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-extrabold text-white text-lg tracking-tight">Kiosk DANA QRIS</h3>
-            <p className="text-xs text-slate-400">Pilih paket air & bayar non-tunai</p>
+            <h3 className="font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-sky-100 to-cyan-300 text-lg tracking-tight">Kiosk DANA QRIS</h3>
+            <p className="text-xs text-sky-200/70">Pilih paket air & bayar non-tunai</p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#118EEA]/20 border border-[#118EEA]/40 text-[#118EEA] text-xs font-black">
-          <span className="w-2 h-2 rounded-full bg-[#118EEA] animate-pulse" />
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-black shadow-sm">
+          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
           DANA SANDBOX
         </div>
       </div>
@@ -165,12 +165,12 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
               }}
               className={`p-3.5 rounded-2xl border text-left transition-all duration-300 relative group ${
                 isSelected
-                  ? 'bg-gradient-to-b from-blue-600/25 to-blue-900/30 border-cyan-400 shadow-lg shadow-blue-600/25 ring-2 ring-cyan-400/30 scale-[1.02]'
-                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                  ? 'bg-gradient-to-b from-[#0369a1]/40 via-[#075985]/50 to-[#0c4a6e]/60 border-cyan-400 shadow-xl shadow-sky-600/30 ring-2 ring-cyan-400/40 scale-[1.02]'
+                  : 'bg-[#06244d]/70 border-sky-500/30 hover:border-cyan-400/50 hover:bg-[#072a5a]'
               }`}
             >
               {pkg.badge && (
-                <span className="inline-block text-[10px] font-black text-cyan-300 bg-cyan-500/20 px-2 py-0.5 rounded-full mb-1 border border-cyan-500/30">
+                <span className="inline-block text-[10px] font-black text-cyan-200 bg-cyan-500/30 px-2 py-0.5 rounded-full mb-1 border border-cyan-400/40">
                   {pkg.badge}
                 </span>
               )}
@@ -242,7 +242,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
           onChange={(e) => setCustomerName(e.target.value)}
           placeholder="Contoh: Budi Santoso"
           disabled={isDeviceOffline}
-          className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 font-sans shadow-inner"
+          className="w-full bg-[#031735]/90 border border-sky-500/30 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-sky-300/40 focus:outline-none focus:border-cyan-300 focus:ring-1 focus:ring-cyan-300 font-sans shadow-inner"
         />
       </div>
 
@@ -253,7 +253,7 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
         className={`w-full py-3.5 px-4 font-extrabold rounded-2xl text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 transition-all relative z-10 ${
           isDeviceOffline
             ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-            : 'bg-gradient-to-r from-[#118EEA] via-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 active:scale-[0.99] text-white shadow-blue-600/30'
+            : 'bg-gradient-to-r from-[#0284c7] via-[#0ea5e9] to-cyan-400 hover:from-sky-500 hover:to-cyan-300 active:scale-[0.99] text-white shadow-sky-500/35 ring-1 ring-sky-300/40'
         }`}
       >
         {isCreating ? (
@@ -272,19 +272,19 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
 
       {/* Active QR Code & Quick Pay Section */}
       {activePendingOrder && !isDeviceOffline && (
-        <div className="mt-5 p-5 rounded-2xl bg-gradient-to-b from-slate-900 via-blue-950/50 to-slate-950 border border-cyan-500/40 flex flex-col items-center text-center shadow-2xl relative z-10 animate-fadeIn">
+        <div className="mt-5 p-5 rounded-2xl bg-gradient-to-b from-[#06264f] via-[#041c3c] to-[#021124] border border-cyan-400/40 flex flex-col items-center text-center shadow-2xl relative z-10 animate-fadeIn">
           
           <div className="flex items-center justify-between w-full mb-3.5">
             <span className="text-xs font-black text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-yellow-400" /> SCAN QRIS DANA
+              <Sparkles className="w-3.5 h-3.5 text-yellow-300" /> SCAN QRIS DANA
             </span>
-            <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2.5 py-0.5 rounded-full border border-slate-800">
+            <span className="text-[11px] font-mono text-sky-200 bg-[#03152d] px-2.5 py-0.5 rounded-full border border-sky-500/30">
               {activePendingOrder.orderId}
             </span>
           </div>
 
           {/* QR Code with Holographic Laser Scanner */}
-          <div className="relative p-4 bg-white rounded-3xl shadow-2xl overflow-hidden my-1.5">
+          <div className="relative p-4 bg-white rounded-3xl shadow-2xl overflow-hidden my-1.5 ring-4 ring-cyan-400/30">
             <div className="laser-line" />
             <QRCodeSVG
               value={activePendingOrder.qrString || activePendingOrder.orderId}
@@ -294,14 +294,14 @@ export default function OrderSimulator({ onOrderCreated, onSimulatePayment, acti
             />
           </div>
 
-          <div className="text-xs text-slate-400 mt-2.5">
+          <div className="text-xs text-sky-200/80 mt-2.5">
             Scan dari aplikasi DANA Sandbox atau klik tombol simulasi di bawah:
           </div>
 
           <button
             onClick={() => handleQuickPay(activePendingOrder.orderId)}
             disabled={isSimulating}
-            className="w-full mt-3.5 py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            className="w-full mt-3.5 py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-emerald-600/35 flex items-center justify-center gap-2 transition-all disabled:opacity-50 ring-2 ring-emerald-400/30"
           >
             {isSimulating ? (
               <Loader2 className="w-4 h-4 animate-spin" />
