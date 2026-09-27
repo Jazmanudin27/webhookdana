@@ -371,7 +371,7 @@ void checkOrderFromServer() {
 // 9. SETUP
 // ==========================================================
 void setup() {
-    // 1. Nonaktifkan Brownout Detector agar ESP32 tidak restart saat transmisi WiFi menyala di daya USB
+    // 1. Nonaktifkan Brownout Detector agar ESP32 tidak restart saat transmisi WiFi
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
     Serial.begin(115200);
@@ -381,17 +381,15 @@ void setup() {
     Serial.println("💧 ESP32 DEPOT AIR OTOMATIS - DANA.ASPARTECH.COM");
     Serial.println("=================================================");
 
+    // Inisialisasi pin output penting
     pinMode(RELAY_PIN, OUTPUT);
-    pinMode(BLUE_LED_PIN, OUTPUT);
-    pinMode(BUZZER_PIN, OUTPUT);
-    pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
-    pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
-
     digitalWrite(RELAY_PIN, RELAY_OFF);
-    digitalWrite(BLUE_LED_PIN, LOW);
-    digitalWrite(BUZZER_PIN, LOW);
 
-    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+    pinMode(BLUE_LED_PIN, OUTPUT);
+    digitalWrite(BLUE_LED_PIN, LOW);
+
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);
 
     // Bypass SSL Certificate untuk HTTPS
     secureClient.setInsecure();
@@ -402,6 +400,11 @@ void setup() {
     if (!connectToWiFi(15)) {
         startEmergencyAP();
     }
+
+    // Pasang Sensor & Interrupt SETELAH WiFi tersambung (mencegah freeze akibat noise pin)
+    pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
+    pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
 }
 
 // ==========================================================
