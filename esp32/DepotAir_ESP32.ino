@@ -25,8 +25,8 @@ WiFiClientSecure secureClient;
 // ==========================================================
 // 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-String wifi_ssid     = "TP-Link_71E8"; // SSID Router TP-Link
-String wifi_password = "11450979";     // Password WiFi
+String wifi_ssid     = "Ade"; // SSID Router TP-Link
+String wifi_password = "12345678";     // Password WiFi
 
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
@@ -97,15 +97,13 @@ void loadStoredWiFi() {
     String storedSSID = preferences.getString("ssid", "");
     String storedPASS = preferences.getString("pass", "");
 
-    if (storedSSID.length() > 0 && storedPASS.length() > 0 && storedPASS != "12345678" && storedSSID != "Jazz") {
-        wifi_ssid = storedSSID;
-        wifi_password = storedPASS;
-        Serial.print("📂 Membaca WiFi dari memori NVS ESP32: ");
+    if (storedSSID == wifi_ssid && storedPASS == wifi_password) {
+        Serial.print("Membaca WiFi dari memori NVS ESP32: ");
         Serial.println(wifi_ssid);
     } else {
         preferences.putString("ssid", wifi_ssid);
         preferences.putString("pass", wifi_password);
-        Serial.println("ℹ️ Memakai konfigurasi WiFi: " + wifi_ssid);
+        Serial.println("Memakai konfigurasi WiFi: " + wifi_ssid);
     }
     preferences.end();
 }
@@ -119,7 +117,7 @@ void saveWiFiToNVS(String newSsid, String newPass) {
     wifi_ssid = newSsid;
     wifi_password = newPass;
 
-    Serial.println("\n💾 [NVS] WiFi baru berhasil disimpan permanen ke memori Flash ESP32!");
+    Serial.println("\n[NVS] WiFi baru berhasil disimpan permanen ke memori Flash ESP32!");
     Serial.print("SSID Baru: "); Serial.println(newSsid);
 }
 
@@ -128,16 +126,17 @@ void saveWiFiToNVS(String newSsid, String newPass) {
 // ==========================================================
 bool connectToWiFi(int timeoutSeconds = 20) {
     Serial.println("\n-------------------------------------------------");
-    Serial.print("📡 Target SSID    : "); Serial.println(wifi_ssid);
-    Serial.print("🔑 Target Password: "); Serial.println(wifi_password);
+    Serial.print("[WIFI] Target SSID    : "); Serial.println(wifi_ssid);
+    Serial.print("[WIFI] Target Password: "); Serial.println(wifi_password);
     Serial.println("-------------------------------------------------");
     Serial.flush();
 
     WiFi.mode(WIFI_STA);
     delay(100);
     
-    Serial.print("⏳ Mencoba menyambungkan ke ");
+    Serial.print("[WIFI] Menghubungkan ke ");
     Serial.println(wifi_ssid);
+    Serial.flush();
     
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
@@ -150,17 +149,17 @@ bool connectToWiFi(int timeoutSeconds = 20) {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n🎉 ✅ WiFi Terhubung Sukses!");
-        Serial.print("📍 IP Address ESP32: "); Serial.println(WiFi.localIP());
-        Serial.print("📶 Sinyal RSSI: "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
+        Serial.println("\n[WIFI] SUKSES TERHUBUNG!");
+        Serial.print("[WIFI] IP Address ESP32: "); Serial.println(WiFi.localIP());
+        Serial.print("[WIFI] Sinyal RSSI     : "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
         
         digitalWrite(BLUE_LED_PIN, HIGH);
         triggerBuzzer(2, 80, 80);
         isApMode = false;
         return true;
     } else {
-        Serial.println("\n❌ Gagal terhubung ke WiFi!");
-        Serial.print("⚠️ Status Code: "); Serial.println(WiFi.status());
+        Serial.println("\n[WIFI] Gagal terhubung!");
+        Serial.print("[WIFI] Status Code: "); Serial.println(WiFi.status());
         digitalWrite(BLUE_LED_PIN, LOW);
         return false;
     }
