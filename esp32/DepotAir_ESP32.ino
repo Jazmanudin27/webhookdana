@@ -410,7 +410,18 @@ void checkOrderFromServer() {
                 String orderId = doc["orderId"].as<String>();
                 float targetLiters = doc["targetLiter"].as<float>();
 
-                prepareOrder(orderId, targetLiters);
+                // Hanya proses jika order ID ini baru dan belum ditangani
+                if (orderId != currentOrderId) {
+                    prepareOrder(orderId, targetLiters);
+                }
+            }
+
+            // Jika tombol Emergency Stop di Web ditekan (status jadi IDLE / EMERGENCY_STOP)
+            if (status && (strcmp(status, "IDLE") == 0 || strcmp(status, "EMERGENCY_STOP") == 0)) {
+                if (isFilling || isWaitingButton) {
+                    Serial.println("\n🛑 [WEB EMERGENCY STOP] Pembatalan diterima dari Website!");
+                    stopFilling(false);
+                }
             }
         }
     }
@@ -468,12 +479,10 @@ void loop() {
         return;
     }
 
-    // Polling server saat standby (belum ada order aktif)
-    if (!isFilling && !isWaitingButton) {
-        if (millis() - lastPollTime >= POLL_INTERVAL) {
-            lastPollTime = millis();
-            checkOrderFromServer();
-        }
+    // Polling server rutin setiap 2 detik (Heartbeat selalu aktif di semua kondisi: Standby, Filling, Paused!)
+    if (millis() - lastPollTime >= POLL_INTERVAL) {
+        lastPollTime = millis();
+        checkOrderFromServer();
     }
 
     // Hitung volume air setiap 1 detik
