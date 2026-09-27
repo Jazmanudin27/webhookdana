@@ -25,8 +25,8 @@ WiFiClientSecure secureClient;
 // ==========================================================
 // 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-String wifi_ssid     = "Ade"; // SSID WiFi Router TP-Link
-String wifi_password = "12345678";     // Password WiFi Router TP-Link
+String wifi_ssid     = "Ade";          // SSID WiFi Router
+String wifi_password = "19052026";     // Password WiFi Router
 
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
@@ -98,11 +98,11 @@ void loadStoredWiFi() {
     String storedPASS = preferences.getString("pass", "");
     preferences.end();
 
-    // Jika di memori NVS masih tersimpan hotspot lama "Jazz" atau "Ade", pastikan terhubung ke Ade
+    // Jika di memori NVS masih tersimpan hotspot lama "Jazz" atau "Ade", pastikan terhubung ke Ade dengan password baru
     if (storedSSID == "Jazz" || storedSSID == "Ade") {
-        saveWiFiToNVS("Ade", "12345678");
+        saveWiFiToNVS("Ade", "19052026");
         storedSSID = "Ade";
-        storedPASS = "12345678";
+        storedPASS = "19052026";
     }
 
     if (storedSSID.length() > 0 && storedPASS.length() > 0) {
