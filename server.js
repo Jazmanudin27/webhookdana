@@ -285,12 +285,22 @@ app.get('/api/esp32/check-order', async (req, res) => {
     const curFlow = parseFloat(req.query.flowRate) || 0;
     const devState = req.query.state; // 'FILLING' | 'PAUSED' | 'WAITING' | 'IDLE'
 
-    if (devState === 'FILLING' && currentState.status !== 'FILLING') {
-      currentState.status = 'FILLING';
-      io.emit('system:state', currentState);
-    } else if (devState === 'PAUSED' && currentState.status !== 'PAUSED') {
-      currentState.status = 'PAUSED';
-      io.emit('system:state', currentState);
+    if (devState === 'FILLING') {
+      if (currentState.pendingCommand === 'START' || currentState.pendingCommand === 'RESUME') {
+        currentState.pendingCommand = null;
+      }
+      if (currentState.status !== 'FILLING') {
+        currentState.status = 'FILLING';
+        io.emit('system:state', currentState);
+      }
+    } else if (devState === 'PAUSED') {
+      if (currentState.pendingCommand === 'PAUSE') {
+        currentState.pendingCommand = null;
+      }
+      if (currentState.status !== 'PAUSED') {
+        currentState.status = 'PAUSED';
+        io.emit('system:state', currentState);
+      }
     } else if (devState === 'WAITING' && currentState.status !== 'PAID') {
       currentState.status = 'PAID';
       io.emit('system:state', currentState);

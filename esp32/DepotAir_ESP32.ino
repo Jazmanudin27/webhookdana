@@ -83,12 +83,10 @@ const unsigned long POLL_INTERVAL = 1500; // Polling setiap 1.5 detik
 // Hardware Interrupt & Debounce untuk Tombol D32
 volatile bool buttonPressedFlag = false;
 volatile unsigned long lastButtonInterruptTime = 0;
-unsigned long lastDebounceTime = 0;
-bool lastButtonState = HIGH;
 
 void IRAM_ATTR buttonISR() {
     unsigned long now = millis();
-    if (now - lastButtonInterruptTime > 250) {
+    if (now - lastButtonInterruptTime > 600) {
         buttonPressedFlag = true;
         lastButtonInterruptTime = now;
     }
@@ -335,6 +333,17 @@ void stopFilling(bool isFinishedSuccess = true) {
 // 2. Mengalir   -> Tekan -> Tutup Keran (Jeda) & 🔴 MERAH
 // 3. Jeda       -> Tekan -> Buka Keran (Lanjut) & 🟢 HIJAU
 void handleButtonPress() {
+    unsigned long now = millis();
+    static unsigned long lastActionTime = 0;
+
+    // Cooldown 600ms untuk mencegah bouncing mekanis tombol atau dobel klik tidak sengaja
+    if (now - lastActionTime < 600) {
+        Serial.println("⚠️ [ANTI-BOUNCE] Dobel klik dicegah (cooldown 600ms aktif).");
+        return;
+    }
+    lastActionTime = now;
+    lastButtonInterruptTime = now;
+
     Serial.println("\n🔘 [AKSI TOMBOL TERDETEKSI!]");
 
     // 1. Menunggu Pembeli Mulai (Status PAID / Ready):
@@ -347,8 +356,8 @@ void handleButtonPress() {
         updateLeds(); // 🟢 TOMBOL BERUBAH JADI HIJAU!
 
         Serial.println("🟢 --> KERAN DIBUKA! Air mulai mengucur (Lampu Hijau D22 ON)...");
-        triggerBuzzer(1, 200);
-        lastPollTime = 0; // Segera sync ke server
+        triggerBuzzer(1, 150);
+        lastPollTime = millis() - 1000; // Sinkronkan ke server 500ms lagi
         return;
     }
 
@@ -361,8 +370,8 @@ void handleButtonPress() {
         Serial.println("🔴 --> PENGISIAN DIJEDA (PAUSE). Keran ditutup (Lampu Merah D21 ON)...");
         Serial.printf("   Terisi saat ini: %.2f / %.2f Liter\n", (float)currentFillMl / 1000.0, (float)targetFillMl / 1000.0);
         Serial.println("   Tekan tombol lagi untuk MELANJUTKAN kucuran air.");
-        triggerBuzzer(2, 100, 80);
-        lastPollTime = 0; // Segera sync ke server
+        triggerBuzzer(2, 70, 60);
+        lastPollTime = millis() - 1000; // Sinkronkan ke server 500ms lagi
         return;
     }
 
@@ -373,8 +382,8 @@ void handleButtonPress() {
         updateLeds(); // 🟢 TOMBOL BERUBAH JADI HIJAU LAGI!
 
         Serial.println("🟢 --> MELANJUTKAN PENGISIAN AIR! Keran dibuka lagi (Lampu Hijau D22 ON)...");
-        triggerBuzzer(1, 200);
-        lastPollTime = 0; // Segera sync ke server
+        triggerBuzzer(1, 150);
+        lastPollTime = millis() - 1000; // Sinkronkan ke server 500ms lagi
         return;
     }
 
@@ -543,21 +552,11 @@ void loop() {
         return;
     }
 
-    // 1. Deteksi Hardware Interrupt Tombol D32
+    // 1. Deteksi Tombol D32 (Hardware Interrupt + Cooldown 600ms Anti Dobel Klik)
     if (buttonPressedFlag) {
         buttonPressedFlag = false;
         handleButtonPress();
     }
-
-    // 2. Deteksi Tombol D32 via Polling DigitalRead (Cadangan jika interrupt terlewat)
-    int btnRead = digitalRead(BUTTON_STOP_PIN);
-    if (btnRead == LOW && lastButtonState == HIGH) {
-        if (millis() - lastDebounceTime > 250) {
-            lastDebounceTime = millis();
-            handleButtonPress();
-        }
-    }
-    lastButtonState = btnRead;
 
     // 3. Polling server rutin (Setiap 1.5 detik di SEMUA status: Standby, Waiting, Filling, Paused)
     //    Memastikan ESP32 SELALU 🟢 ONLINE dan telemetry terkirim real-time

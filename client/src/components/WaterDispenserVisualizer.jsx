@@ -9,8 +9,13 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
   const isStopped = systemState?.status === 'EMERGENCY_STOP' || systemState?.status === 'STOPPED';
 
   const [isToggling, setIsToggling] = useState(false);
+  const [lastToggleTime, setLastToggleTime] = useState(0);
 
   const handleToggleWater = async () => {
+    const now = Date.now();
+    if (now - lastToggleTime < 800 || isToggling) return;
+    setLastToggleTime(now);
+
     try {
       setIsToggling(true);
       await fetch('/api/dispenser/action', {
@@ -21,7 +26,7 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
     } catch (err) {
       console.error('Failed to toggle dispenser:', err);
     } finally {
-      setIsToggling(false);
+      setTimeout(() => setIsToggling(false), 500);
     }
   };
 
