@@ -131,10 +131,8 @@ bool connectToWiFi(int timeoutSeconds = 20) {
     Serial.println("-------------------------------------------------");
     Serial.flush();
 
-    WiFi.disconnect(true);
-    delay(200);
     WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
+    delay(100);
     
     Serial.print("⏳ Mencoba menyambungkan ke ");
     Serial.println(wifi_ssid);
