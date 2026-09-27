@@ -386,12 +386,14 @@ app.post('/api/device/save-wifi', async (req, res) => {
 
 app.get('/api/device/settings', async (req, res) => {
   const wifiSsid = await db.getSetting('wifi_ssid', 'WiFi_Depot_Air');
+  const wifiPass = await db.getSetting('wifi_password', '');
   const pendingUpdate = await db.getSetting('pending_wifi_update');
 
   return res.json({
     success: true,
     data: {
       wifiSsid,
+      wifiPassword: wifiPass || '',
       hasPendingUpdate: Boolean(pendingUpdate),
       esp32CurrentSsid: currentState.esp32CurrentSsid,
       databaseType: db.isMySqlConnected() ? 'MySQL / MariaDB' : 'JSON Flat File (data/)'

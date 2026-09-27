@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, Key, Save, CheckCircle2, AlertCircle, RefreshCw, Cpu, Loader2, Info } from 'lucide-react';
+import { Wifi, Key, Save, CheckCircle2, AlertCircle, RefreshCw, Cpu, Loader2, Info, Eye, EyeOff } from 'lucide-react';
 
 export default function WifiSettingsCard({ systemState }) {
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(true);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
   const [currentConfig, setCurrentConfig] = useState(null);
@@ -16,6 +16,7 @@ export default function WifiSettingsCard({ systemState }) {
       if (data.success) {
         setCurrentConfig(data.data);
         if (data.data.wifiSsid) setSsid(data.data.wifiSsid);
+        if (data.data.wifiPassword !== undefined) setPassword(data.data.wifiPassword);
       }
     } catch (e) {
       console.error('Failed to fetch settings:', e);
@@ -49,7 +50,7 @@ export default function WifiSettingsCard({ systemState }) {
           type: 'success',
           text: data.message
         });
-        setPassword('');
+        // Tidak mengosongkan password agar tetap terlihat dan tersimpan
         fetchSettings();
       } else {
         setStatusMsg({ type: 'error', text: data.message || 'Gagal menyimpan konfigurasi' });
@@ -89,13 +90,13 @@ export default function WifiSettingsCard({ systemState }) {
         <form onSubmit={handleSaveWifi} className="lg:col-span-7 space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Wifi className="w-3.5 h-3.5 text-blue-400" /> Nama WiFi Baru (SSID)
+              <Wifi className="w-3.5 h-3.5 text-blue-400" /> Nama WiFi (SSID)
             </label>
             <input
               type="text"
               value={ssid}
               onChange={(e) => setSsid(e.target.value)}
-              placeholder="Contoh: MyHome_WiFi_2.4G"
+              placeholder="Contoh: TP-Link_71E8"
               required
               className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
             />
@@ -103,26 +104,36 @@ export default function WifiSettingsCard({ systemState }) {
 
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Key className="w-3.5 h-3.5 text-blue-400" /> Password WiFi Baru
+              <Key className="w-3.5 h-3.5 text-blue-400" /> Password WiFi
             </label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Masukkan password WiFi baru"
-                className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono pr-20"
+                placeholder="Masukkan password WiFi"
+                className="w-full bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono pr-24"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 hover:text-white px-2 py-1 bg-slate-800 rounded-lg"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center gap-1 transition-all"
               >
-                {showPassword ? 'Sembunyikan' : 'Lihat'}
+                {showPassword ? (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5" />
+                    <span>Tutup</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Lihat</span>
+                  </>
+                )}
               </button>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              Kosongkan jika jaringan WiFi tersebut tidak menggunakan password.
+              Password tersimpan secara aman di database dan tidak akan hilang saat disimpan.
             </p>
           </div>
 
@@ -163,7 +174,7 @@ export default function WifiSettingsCard({ systemState }) {
           </div>
 
           <p className="text-slate-300 leading-relaxed">
-            1. Saat Anda menekan tombol <strong>Simpan</strong>, nama WiFi dan password baru akan disimpan di cloud.
+            1. Saat Anda menekan tombol <strong>Simpan</strong>, nama WiFi dan password baru akan tersimpan di database.
           </p>
           <p className="text-slate-300 leading-relaxed">
             2. Pada polling berikutnya (setiap 2 detik), ESP32 otomatis menerima data WiFi baru dan menyimpannya secara permanen ke <strong>Memori Flash Internal ESP32 (Non-Volatile Storage / NVS)</strong>.
