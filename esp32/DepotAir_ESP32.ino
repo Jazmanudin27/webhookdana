@@ -1,14 +1,29 @@
+/*
+  ===========================================================================================
+  PROYEK   : DEPOT AIR ISI ULANG OTOMATIS - DANA.ASPARTECH.COM
+  FITUR    : 
+    1. Polling ke Server Backend (HTTP GET /api/esp32/check-order) setiap 2 detik.
+    2. Mendukung PENGATURAN WIFI JARAK JAUH (Cloud OTA WiFi) via menu dana.aspartech.com
+    3. Menyimpan SSID & Password WiFi secara permanen di Flash NVS (Preferences.h)
+    4. Otomatis membuka kran relay (GPIO 26) & menghitung liter (GPIO 18) saat pembayaran sukses.
+    5. Tombol darurat stop (GPIO 4) & Buzzer alert (GPIO 19).
+  ===========================================================================================
+*/
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
+#include <WebServer.h>
+
+Preferences preferences;
 
 // ==========================================================
-// 1. KONFIGURASI WIFI & SERVER CLOUD
+// 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-const char* WIFI_SSID     = "NAMA_WIFI_ANDA";     // Ganti dengan nama WiFi Anda
-const char* WIFI_PASSWORD = "PASSWORD_WIFI_ANDA"; // Ganti dengan password WiFi Anda
+String wifi_ssid     = "NAMA_WIFI_ANDA";     // Default SSID jika belum disetting di web
+String wifi_password = "PASSWORD_WIFI_ANDA"; // Default Password
 
-// Domain Server Backend Anda
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
 // Endpoint API
@@ -16,8 +31,14 @@ String urlCheckOrder = String(BASE_SERVER_URL) + "/api/esp32/check-order";
 String urlFinishFill = String(BASE_SERVER_URL) + "/api/esp32/finish-fill";
 String urlTelemetry  = String(BASE_SERVER_URL) + "/api/esp32/telemetry";
 
+// Hotspot Darurat jika WiFi rumah mati / belum tersetting
+const char* AP_SSID = "ESP32_Depot_Air";
+const char* AP_PASS = "12345678";
+WebServer apServer(80);
+bool isApMode = false;
+
 // ==========================================================
-// 2. PENETAPAN PIN ESP32 (Sesuai Hardware Anda)
+// 2. PENETAPAN PIN ESP32
 // ==========================================================
 const int RELAY_PIN       = 26; // Relay Solenoid Valve
 const int BLUE_LED_PIN    = 2;  // LED Indikator Status
@@ -25,42 +46,34 @@ const int BUTTON_STOP_PIN = 4;  // Tombol Darurat (Stop/Pause)
 const int FLOW_SENSOR_PIN = 18; // Sinyal Kuning Sensor Water Flow
 const int BUZZER_PIN      = 19; // Sinyal (+) Buzzer
 
-// Logika Relay (Sebagian besar modul Relay adalah Active LOW)
-const int RELAY_ON  = LOW;  // Jika relay Anda aktif HIGH, ganti jadi HIGH
-const int RELAY_OFF = HIGH; // Jika relay Anda aktif HIGH, ganti jadi LOW
+// Logika Relay (Active LOW)
+const int RELAY_ON  = LOW;
+const int RELAY_OFF = HIGH;
 
 // ==========================================================
-// 3. VARIABEL PROSES PENGISIAN AIR & SENSOR FLOW
+// 3. VARIABEL FLOW SENSOR & SISTEM
 // ==========================================================
-bool isFilling = false;                 // Status apakah sedang mengisi air
-unsigned long currentFillMl = 0;       // Liter terisi pada transaksi SEKARANG (mL)
-unsigned long targetFillMl  = 0;       // Target liter transaksi (mL)
-unsigned long totalAccumulatedMl = 0;  // Total akumulasi seluruh transaksi (mL)
-String currentOrderId = "";            // ID Transaksi DANA yang sedang diproses
+bool isFilling = false;
+unsigned long currentFillMl = 0;
+unsigned long targetFillMl  = 0;
+unsigned long totalAccumulatedMl = 0;
+String currentOrderId = "";
 
 volatile byte pulseCount = 0;
-float flowRate = 0.0;                  // Debit (L/min)
+float flowRate = 0.0;
 unsigned long oldTime = 0;
-const float calibrationFactor = 7.5;   // Faktor Kalibrasi Sensor YF-S201
+const float calibrationFactor = 7.5; // YF-S201
 
-// Polling interval ke server
 unsigned long lastPollTime = 0;
-const unsigned long POLL_INTERVAL = 2000; // Cek order baru tiap 2 detik
+const unsigned long POLL_INTERVAL = 2000;
 
-// Debounce tombol
 unsigned long lastDebounceTime = 0;
 bool lastButtonState = HIGH;
 
-// ==========================================================
-// 4. INTERRUPT SERVICE ROUTINE (ISR)
-// ==========================================================
 void IRAM_ATTR pulseCounter() {
     pulseCount++;
 }
 
-// ==========================================================
-// 5. NADA BUZZER
-// ==========================================================
 void triggerBuzzer(int beepCount, int durationMs = 80, int pauseMs = 80) {
     for (int i = 0; i < beepCount; i++) {
         digitalWrite(BUZZER_PIN, HIGH);
@@ -71,7 +84,116 @@ void triggerBuzzer(int beepCount, int durationMs = 80, int pauseMs = 80) {
 }
 
 // ==========================================================
-// 6. FUNGSI MEMULAI PENGISIAN
+// 4. MEMUAT & MENYIMPAN WIFI DARI FLASH NVS
+// ==========================================================
+void loadStoredWiFi() {
+    preferences.begin("depot_wifi", false);
+    String storedSSID = preferences.getString("ssid", "");
+    String storedPASS = preferences.getString("pass", "");
+    preferences.end();
+
+    if (storedSSID.length() > 0) {
+        wifi_ssid = storedSSID;
+        wifi_password = storedPASS;
+        Serial.print("📂 Membaca WiFi dari memori ESP32: ");
+        Serial.println(wifi_ssid);
+    } else {
+        Serial.println("ℹ️ Memakai default WiFi (Belum ada data tersimpan)");
+    }
+}
+
+void saveWiFiToNVS(String newSsid, String newPass) {
+    preferences.begin("depot_wifi", false);
+    preferences.putString("ssid", newSsid);
+    preferences.putString("pass", newPass);
+    preferences.end();
+    
+    wifi_ssid = newSsid;
+    wifi_password = newPass;
+
+    Serial.println("\n💾 [NVS] WiFi baru berhasil disimpan permanen ke memori Flash ESP32!");
+    Serial.print("SSID Baru: "); Serial.println(newSsid);
+}
+
+// ==========================================================
+// 5. KONEKSI KE WIFI
+// ==========================================================
+bool connectToWiFi(int timeoutSeconds = 15) {
+    Serial.print("Menghubungkan ke WiFi: ");
+    Serial.println(wifi_ssid);
+
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
+
+    int count = 0;
+    while (WiFi.status() != WL_CONNECTED && count < (timeoutSeconds * 2)) {
+        delay(500);
+        Serial.print(".");
+        digitalWrite(BLUE_LED_PIN, !digitalRead(BLUE_LED_PIN));
+        count++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\n✅ WiFi Terhubung Sukses!");
+        Serial.print("IP ESP32: "); Serial.println(WiFi.localIP());
+        digitalWrite(BLUE_LED_PIN, HIGH);
+        triggerBuzzer(2, 80, 80);
+        isApMode = false;
+        return true;
+    } else {
+        Serial.println("\n❌ Gagal terhubung ke WiFi!");
+        digitalWrite(BLUE_LED_PIN, LOW);
+        return false;
+    }
+}
+
+// ==========================================================
+// 6. HOTSPOT DARURAT / CAPTIVE PORTAL (Jika WiFi Gagal Konek)
+// ==========================================================
+void startEmergencyAP() {
+    isApMode = true;
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+
+    Serial.println("\n⚠️ [MODE DARURAT] Membuka Hotspot Konfigurasi WiFi:");
+    Serial.print("SSID: "); Serial.println(AP_SSID);
+    Serial.print("Password: "); Serial.println(AP_PASS);
+    Serial.print("Buka browser di HP/Laptop ke: http://"); Serial.println(WiFi.softAPIP());
+
+    apServer.on("/", []() {
+        String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>Pengaturan WiFi Depot Air</title>"
+                      "<style>body{font-family:sans-serif;background:#0f172a;color:#fff;padding:20px;text-align:center;}"
+                      ".card{background:#1e293b;padding:24px;border-radius:16px;max-width:350px;margin:auto;}"
+                      "input{width:100%;padding:10px;margin:10px 0;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;box-sizing:border-box;}"
+                      "button{background:#0284c7;color:#fff;border:none;padding:12px;width:100%;border-radius:8px;font-weight:bold;cursor:pointer;}</style></head>"
+                      "<body><div class='card'><h2>Pengaturan WiFi ESP32</h2><p style='font-size:13px;color:#94a3b8;'>Masukkan WiFi Rumah / Depot Anda:</p>"
+                      "<form action='/save' method='POST'>"
+                      "<input type='text' name='ssid' placeholder='Nama WiFi (SSID)' required>"
+                      "<input type='password' name='pass' placeholder='Password WiFi'>"
+                      "<button type='submit'>Simpan & Sambungkan</button></form></div></body></html>";
+        apServer.send(200, "text/html", html);
+    });
+
+    apServer.on("/save", []() {
+        if (apServer.hasArg("ssid")) {
+            String s = apServer.arg("ssid");
+            String p = apServer.hasArg("pass") ? apServer.arg("pass") : "";
+            saveWiFiToNVS(s, p);
+
+            String resp = "<html><body style='background:#0f172a;color:#fff;text-align:center;padding:40px;font-family:sans-serif;'>"
+                          "<h2>✅ Tersimpan!</h2><p>ESP32 sedang mencoba menyambung ke " + s + "...</p></body></html>";
+            apServer.send(200, "text/html", resp);
+            delay(2000);
+            ESP.restart();
+        }
+    });
+
+    apServer.begin();
+}
+
+// ==========================================================
+// 7. PROSES TRANSAKSI & KONTROL PENGISIAN AIR
 // ==========================================================
 void startFilling(String orderId, float targetLiters) {
     currentOrderId = orderId;
@@ -90,17 +212,11 @@ void startFilling(String orderId, float targetLiters) {
     Serial.println(orderId);
     Serial.println("==========================================");
     
-    triggerBuzzer(1, 250); // Bip 1x tanda mulai
+    triggerBuzzer(1, 250);
 }
 
-// ==========================================================
-// 7. FUNGSI MENGIRIM STATUS SELESAI KE SERVER
-// ==========================================================
 void notifyServerFinished(bool isFinishedSuccess) {
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi terputus saat kirim laporan selesai!");
-        return;
-    }
+    if (WiFi.status() != WL_CONNECTED) return;
 
     HTTPClient http;
     http.begin(urlFinishFill);
@@ -114,21 +230,10 @@ void notifyServerFinished(bool isFinishedSuccess) {
     String jsonBody;
     serializeJson(doc, jsonBody);
 
-    Serial.print("📤 Mengirim konfirmasi ke server: ");
-    Serial.println(jsonBody);
-
-    int httpCode = http.POST(jsonBody);
-    if (httpCode > 0) {
-        Serial.printf("✅ Server merespons code: %d\n", httpCode);
-    } else {
-        Serial.printf("❌ Gagal kirim ke server, error: %s\n", http.errorToString(httpCode).c_str());
-    }
+    http.POST(jsonBody);
     http.end();
 }
 
-// ==========================================================
-// 8. FUNGSI MENGIRIM TELEMETRI REAL-TIME (LITER LIVE)
-// ==========================================================
 void sendLiveTelemetry() {
     if (WiFi.status() != WL_CONNECTED || !isFilling) return;
 
@@ -148,9 +253,6 @@ void sendLiveTelemetry() {
     http.end();
 }
 
-// ==========================================================
-// 9. FUNGSI MENGHENTIKAN PENGISIAN
-// ==========================================================
 void stopFilling(bool isFinishedSuccess = true) {
     isFilling = false;
     digitalWrite(RELAY_PIN, RELAY_OFF);
@@ -158,11 +260,11 @@ void stopFilling(bool isFinishedSuccess = true) {
     
     if (isFinishedSuccess) {
         Serial.println("\n🎉 --> PENGISIAN SELESAI OTOMATIS!");
-        triggerBuzzer(4, 120, 80); // Bip 4x cepat tanda sukses selesai!
+        triggerBuzzer(4, 120, 80);
         notifyServerFinished(true);
     } else {
         Serial.println("\n🚨 --> PENGISIAN DIHENTIKAN MANUAL / EMERGENCY!");
-        triggerBuzzer(2, 350, 100); // Bip panjang 2x tanda stop
+        triggerBuzzer(2, 350, 100);
         notifyServerFinished(false);
     }
 
@@ -172,7 +274,7 @@ void stopFilling(bool isFinishedSuccess = true) {
 }
 
 // ==========================================================
-// 10. FUNGSI POLLING KE SERVER (/api/esp32/check-order)
+// 8. POLLING CLOUD DANA & MENERIMA UPDATE WIFI DARI WEB
 // ==========================================================
 void checkOrderFromServer() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -182,7 +284,9 @@ void checkOrderFromServer() {
     }
 
     HTTPClient http;
-    http.begin(urlCheckOrder);
+    // Kirim juga SSID aktif saat ini ke server untuk monitoring di dashboard
+    String url = urlCheckOrder + "?ssid=" + wifi_ssid;
+    http.begin(url);
     http.setTimeout(3500);
 
     int httpCode = http.GET();
@@ -196,12 +300,36 @@ void checkOrderFromServer() {
         if (!error) {
             const char* status = doc["status"];
             
-            // Jika ada pembayaran DANA yang sukses masuk (status == PAID)
+            // --- FITUR 1: TERIMA PERINTAH GANTI WIFI DARI DASHBOARD WEB ---
+            if (status && strcmp(status, "UPDATE_WIFI") == 0) {
+                String newSsid = doc["wifiSsid"].as<String>();
+                String newPass = doc["wifiPassword"].as<String>();
+
+                Serial.println("\n⚡ [OTA CLOUD] Menerima Perintah Ganti WiFi dari Website!");
+                Serial.print("Mencoba menyambung ke SSID Baru: "); Serial.println(newSsid);
+
+                // Bunyikan nada beep 3x
+                triggerBuzzer(3, 100, 100);
+
+                // Simpan ke Flash NVS
+                saveWiFiToNVS(newSsid, newPass);
+
+                // Coba sambungkan ke WiFi baru
+                if (connectToWiFi(15)) {
+                    Serial.println("🎉 Berhasil beralih ke WiFi baru!");
+                } else {
+                    Serial.println("⚠️ Gagal konek ke WiFi baru, membuka Hotspot darurat...");
+                    startEmergencyAP();
+                }
+                http.end();
+                return;
+            }
+
+            // --- FITUR 2: TERIMA PESANAN PEMBAYARAN DANA (PAID) ---
             if (status && strcmp(status, "PAID") == 0) {
                 String orderId = doc["orderId"].as<String>();
                 float targetLiters = doc["targetLiter"].as<float>();
 
-                // Mulai mengalirkan air sesuai pesanan
                 startFilling(orderId, targetLiters);
             }
         }
@@ -210,7 +338,7 @@ void checkOrderFromServer() {
 }
 
 // ==========================================================
-// 11. SETUP
+// 9. SETUP
 // ==========================================================
 void setup() {
     Serial.begin(115200);
@@ -232,35 +360,27 @@ void setup() {
 
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
 
-    // Hubungkan ke WiFi Internet
-    Serial.print("Menghubungkan ke WiFi: ");
-    Serial.println(WIFI_SSID);
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // 1. Muat WiFi dari NVS Flash
+    loadStoredWiFi();
 
-    int count = 0;
-    while (WiFi.status() != WL_CONNECTED && count < 30) {
-        delay(500);
-        Serial.print(".");
-        digitalWrite(BLUE_LED_PIN, !digitalRead(BLUE_LED_PIN)); // Blink saat connecting
-        count++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n✅ WiFi Terhubung!");
-        Serial.print("IP ESP32: "); Serial.println(WiFi.localIP());
-        digitalWrite(BLUE_LED_PIN, HIGH);
-        triggerBuzzer(2, 80, 80); // Bip 2x tanda online
-    } else {
-        Serial.println("\n❌ Gagal konek WiFi! Periksa SSID & Password.");
+    // 2. Hubungkan ke WiFi
+    if (!connectToWiFi(15)) {
+        // Jika gagal konek, aktifkan hotspot darurat
+        startEmergencyAP();
     }
 }
 
 // ==========================================================
-// 12. LOOP UTAMA
+// 10. LOOP UTAMA
 // ==========================================================
 void loop() {
-    // --- 1. POLLING SERVER DANA SETIAP 2 DETIK (JIKA SEDANG TIDAK MENGISI) ---
+    // Jika sedang dalam mode Hotspot Darurat
+    if (isApMode) {
+        apServer.handleClient();
+        return;
+    }
+
+    // Polling Cloud Server setiap 2 detik saat standby
     if (!isFilling) {
         if (millis() - lastPollTime >= POLL_INTERVAL) {
             lastPollTime = millis();
@@ -268,14 +388,13 @@ void loop() {
         }
     }
 
-    // --- 2. PROSES HITUNGAN VOLUME AIR & SENSOR FLOW SETIAP 1 DETIK ---
+    // Hitung volume air setiap 1 detik
     if ((millis() - oldTime) > 1000) {
         detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
         
         flowRate = ((1000.0 / (millis() - oldTime)) * pulseCount) / calibrationFactor;
         oldTime = millis();
         
-        // Hitung mililiter air yang mengalir dalam 1 detik ini
         unsigned int mlThisSecond = (flowRate / 60.0) * 1000;
         
         if (isFilling) {
@@ -287,12 +406,10 @@ void loop() {
                           (float)targetFillMl / 1000.0, 
                           flowRate);
 
-            // Kirim telemetri live ke dashboard web
             sendLiveTelemetry();
 
-            // CEK OTO-STOP: Apakah air terisi sudah mencapai target?
             if (currentFillMl >= targetFillMl) {
-                stopFilling(true); // Selesai otomatis!
+                stopFilling(true);
             }
         }
         
@@ -300,12 +417,12 @@ void loop() {
         attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
     }
 
-    // --- 3. TOMBOL DARURAT (MANUAL STOP) ---
+    // Tombol Darurat Manual
     int btnRead = digitalRead(BUTTON_STOP_PIN);
     if (btnRead == LOW && lastButtonState == HIGH) {
         if (millis() - lastDebounceTime > 250) {
             if (isFilling) {
-                stopFilling(false); // Hentikan pengisian jika sedang berjalan
+                stopFilling(false);
             }
             lastDebounceTime = millis();
         }

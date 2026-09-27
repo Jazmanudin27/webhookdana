@@ -23,6 +23,7 @@ import OrderSimulator from './components/OrderSimulator';
 import WebhookInspector from './components/WebhookInspector';
 import TransactionHistory from './components/TransactionHistory';
 import HardwareConfigGuide from './components/HardwareConfigGuide';
+import WifiSettingsCard from './components/WifiSettingsCard';
 
 export default function App() {
   const [socket, setSocket] = useState(null);
@@ -273,9 +274,10 @@ export default function App() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
           {[
             { id: 'dashboard', label: 'Monitor & Kiosk', icon: Droplet },
+            { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi },
             { id: 'inspector', label: 'Webhook & ESP32 Live Log', icon: Terminal },
             { id: 'transactions', label: 'Riwayat Transaksi', icon: History },
             { id: 'hardware', label: 'Konfigurasi & Wiring', icon: Cpu }
@@ -286,7 +288,7 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
@@ -317,6 +319,11 @@ export default function App() {
               />
             </div>
           </div>
+        )}
+
+        {/* Tab 2: WiFi Settings */}
+        {activeTab === 'wifi' && (
+          <WifiSettingsCard systemState={systemState} />
         )}
 
         {/* Tab 2: Webhook & Logs Inspector */}

@@ -16,7 +16,7 @@ const io = new Server(server, {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3005;
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
 // Middleware
@@ -33,17 +33,23 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const TRANSACTIONS_FILE = path.join(DATA_DIR, 'transactions.json');
 const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 // Load stored data or initialize
 let transactions = [];
 let auditLogs = [];
+let deviceSettings = {
+  wifiSsid: 'WiFi_Depot_Air',
+  wifiPassword: '',
+  pulsesPerLiter: 450,
+  pendingWifiUpdate: null // { ssid, password, timestamp }
+};
 
 try {
   if (fs.existsSync(TRANSACTIONS_FILE)) {
     transactions = JSON.parse(fs.readFileSync(TRANSACTIONS_FILE, 'utf8'));
   }
 } catch (e) {
-  console.error('Error reading transactions.json:', e.message);
   transactions = [];
 }
 
@@ -52,16 +58,27 @@ try {
     auditLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
   }
 } catch (e) {
-  console.error('Error reading logs.json:', e.message);
   auditLogs = [];
+}
+
+try {
+  if (fs.existsSync(SETTINGS_FILE)) {
+    deviceSettings = { ...deviceSettings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
+  }
+} catch (e) {
+  console.error('Error reading settings.json:', e.message);
 }
 
 function saveTransactions() {
   try {
     fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(transactions.slice(-200), null, 2));
-  } catch (e) {
-    console.error('Failed to save transactions:', e.message);
-  }
+  } catch (e) {}
+}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(deviceSettings, null, 2));
+  } catch (e) {}
 }
 
 function addLog(source, type, message, payload = null) {
@@ -90,6 +107,7 @@ let currentState = {
   esp32LastSeen: null,
   esp32Ip: null,
   esp32Status: 'OFFLINE',
+  esp32CurrentSsid: null,
   totalWaterDispensedToday: 0,
   totalRevenueToday: 0
 };
@@ -124,10 +142,6 @@ setInterval(() => {
 // 1. DANA SANDBOX WEBHOOK & ORDER ENDPOINTS
 // ==========================================
 
-/**
- * Endpoint: /api/dana/create-order
- * Digunakan oleh Web Dashboard / User Kiosk untuk membuat order transaksi isi ulang
- */
 app.post('/api/dana/create-order', (req, res) => {
   try {
     const { packageType, customLiter, customerName } = req.body;
@@ -142,7 +156,6 @@ app.post('/api/dana/create-order', (req, res) => {
       title = 'Isi Ulang 2 Galon (38L)';
     } else if (packageType === 'CUSTOM' && customLiter > 0) {
       targetLiter = Number(customLiter);
-      // Rp 368 per liter (~Rp 7.000 / 19L)
       amount = Math.round((targetLiter / 19) * 7000);
       title = `Isi Ulang Custom (${targetLiter}L)`;
     }
@@ -156,7 +169,7 @@ app.post('/api/dana/create-order', (req, res) => {
       targetLiter,
       amount,
       currency: 'IDR',
-      status: 'PENDING', // 'PENDING' -> 'PAID' -> 'FILLING' -> 'COMPLETED'
+      status: 'PENDING',
       createdAt: new Date().toISOString(),
       paidAt: null,
       completedAt: null,
@@ -169,7 +182,6 @@ app.post('/api/dana/create-order', (req, res) => {
     saveTransactions();
 
     addLog('DASHBOARD', 'INFO', `Order baru dibuat: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
-    
     io.emit('order:created', newOrder);
 
     return res.status(201).json({
@@ -178,50 +190,33 @@ app.post('/api/dana/create-order', (req, res) => {
       data: newOrder
     });
   } catch (error) {
-    console.error('Error creating order:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 });
 
-/**
- * Endpoint: /api/dana/finish-notify
- * Webhook resmi dari DANA Sandbox untuk notifikasi pembayaran sukses (Finish Notify)
- */
 app.post('/api/dana/finish-notify', (req, res) => {
   try {
     const rawBody = req.body;
-    console.log('--- DANA FINISH-NOTIFY WEBHOOK RECEIVED ---');
-    console.log(JSON.stringify(rawBody, null, 2));
-
-    // Ekstraksi data baik dari format standar DANA OpenAPI maupun format simulasi sederhana
     let merchantTransId = null;
     let acquirementId = null;
     let amountVal = null;
-    let resultStatus = 'SUCCESS';
 
     if (rawBody.response && rawBody.response.body) {
-      // Standar format DANA Open API
       const b = rawBody.response.body;
       merchantTransId = b.merchantTransId || (b.orderInfo && b.orderInfo.merchantTransId);
       acquirementId = b.acquirementId;
       amountVal = b.amount ? Number(b.amount.value) : null;
-      resultStatus = b.resultInfo ? b.resultInfo.resultStatus : 'SUCCESS';
     } else {
-      // Fallback format payload langsung
       merchantTransId = rawBody.merchantTransId || rawBody.orderId || rawBody.order_id;
       acquirementId = rawBody.acquirementId || rawBody.transaction_id || 'DANA-ACQ-' + Date.now();
       amountVal = rawBody.amount || rawBody.totalAmount;
-      resultStatus = rawBody.resultStatus || rawBody.status || 'SUCCESS';
     }
 
-    // Log payload webhook yang masuk
     addLog('DANA_WEBHOOK', 'SUCCESS', `Webhook Finish-Notify diterima untuk Order: ${merchantTransId || 'Unknown'}`, rawBody);
 
-    // Cari transaksi di database
     let order = transactions.find(t => t.orderId === merchantTransId || t.merchantTransId === merchantTransId);
 
     if (!order) {
-      // Jika order belum terdaftar (misal dipicu langsung via webhook tester), buat otomatis
       const liter = amountVal >= 14000 ? 38 : 19;
       order = {
         orderId: merchantTransId || 'DANA-AUTO-' + Date.now(),
@@ -248,7 +243,6 @@ app.post('/api/dana/finish-notify', (req, res) => {
 
     saveTransactions();
 
-    // Update Status Depot & Queue ke ESP32
     currentState.status = 'PAID';
     currentState.activeOrder = {
       orderId: order.orderId,
@@ -259,13 +253,11 @@ app.post('/api/dana/finish-notify', (req, res) => {
       paidAt: order.paidAt
     };
 
-    // Broadcast ke frontend / dashboard real-time
     io.emit('order:paid', order);
     io.emit('system:state', currentState);
 
     addLog('SYSTEM', 'SUCCESS', `Pembayaran DANA Dikonfirmasi! Mengantrikan Dispenser ESP32: ${order.targetLiter} Liter`, currentState.activeOrder);
 
-    // DANA Open API Standar Response
     return res.status(200).json({
       response: {
         head: {
@@ -285,31 +277,17 @@ app.post('/api/dana/finish-notify', (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Webhook error:', error);
-    addLog('DANA_WEBHOOK', 'ERROR', 'Error saat memproses webhook DANA: ' + error.message, error.stack);
     return res.status(500).json({
-      response: {
-        body: {
-          resultInfo: {
-            resultStatus: 'F',
-            resultCode: 'FAILED',
-            resultMsg: error.message
-          }
-        }
-      }
+      response: { body: { resultInfo: { resultStatus: 'F', resultCode: 'FAILED', resultMsg: error.message } } }
     });
   }
 });
 
-/**
- * Endpoint Simulasi Pembayaran Cepat (Untuk Test / Demo Sandbox)
- */
 app.post('/api/dana/simulate-pay', (req, res) => {
   const { orderId } = req.body;
   let targetOrder = transactions.find(t => t.orderId === orderId);
 
   if (!targetOrder) {
-    // Buat order default 1 galon jika tidak ada ID
     const newOrderId = 'DANA-SIM-' + Date.now();
     targetOrder = {
       orderId: newOrderId,
@@ -325,34 +303,6 @@ app.post('/api/dana/simulate-pay', (req, res) => {
     transactions.unshift(targetOrder);
   }
 
-  // Siapkan payload seolah-olah dikirim oleh DANA Gateway
-  const danaWebhookPayload = {
-    response: {
-      head: {
-        version: '2.0',
-        function: 'dana.acquirement.order.finishNotify',
-        clientId: process.env.DANA_CLIENT_ID || '2021000000000001',
-        reqTime: new Date().toISOString()
-      },
-      body: {
-        resultInfo: {
-          resultStatus: 'S',
-          resultCode: 'SUCCESS',
-          resultMsg: 'Transaction successful in Sandbox'
-        },
-        merchantTransId: targetOrder.orderId,
-        acquirementId: 'DANA-SIM-ACQ-' + Date.now(),
-        orderTitle: targetOrder.title,
-        amount: {
-          value: `${targetOrder.amount}.00`,
-          currency: 'IDR'
-        },
-        payTime: new Date().toISOString()
-      }
-    }
-  };
-
-  // Jalankan logika webhook finish-notify
   targetOrder.status = 'PAID';
   targetOrder.paidAt = new Date().toISOString();
   saveTransactions();
@@ -367,7 +317,7 @@ app.post('/api/dana/simulate-pay', (req, res) => {
     paidAt: targetOrder.paidAt
   };
 
-  addLog('DANA_WEBHOOK', 'SUCCESS', `[SIMULASI] Pembayaran Sukses DANA Sandbox untuk Order: ${targetOrder.orderId}`, danaWebhookPayload);
+  addLog('DANA_WEBHOOK', 'SUCCESS', `[SIMULASI] Pembayaran Sukses DANA Sandbox untuk Order: ${targetOrder.orderId}`, targetOrder);
 
   io.emit('order:paid', targetOrder);
   io.emit('system:state', currentState);
@@ -375,27 +325,43 @@ app.post('/api/dana/simulate-pay', (req, res) => {
   return res.json({
     success: true,
     message: 'Simulasi pembayaran DANA Sandbox sukses!',
-    order: targetOrder,
-    simulatedWebhook: danaWebhookPayload
+    order: targetOrder
   });
 });
 
 // ==========================================
-// 2. ESP32 FIRMWARE POLLING & CONTROL API
+// 2. ESP32 POLLING & WIFI SETTINGS API
 // ==========================================
 
 /**
  * Endpoint: /api/esp32/check-order
- * ESP32 memanggil endpoint ini setiap 2 detik (HTTP GET).
- * Mengembalikan status "PAID" jika ada transaksi yang perlu diisi, atau "IDLE".
+ * ESP32 polling setiap 2 detik. Jika ada instruksi ganti WiFi, server mengembalikan command UPDATE_WIFI
  */
 app.get('/api/esp32/check-order', (req, res) => {
-  // Catat heartbeat ESP32
   currentState.esp32LastSeen = new Date().toISOString();
   currentState.esp32Ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'ESP32-Client';
   currentState.esp32Status = 'ONLINE';
 
-  // Jika ada order berstatus PAID yang siap diisi
+  if (req.query.ssid) {
+    currentState.esp32CurrentSsid = req.query.ssid;
+  }
+
+  // 1. Cek apakah ada antrean instruksi Ganti WiFi dari Dashboard
+  if (deviceSettings.pendingWifiUpdate) {
+    const updatePayload = {
+      status: 'UPDATE_WIFI',
+      wifiSsid: deviceSettings.pendingWifiUpdate.ssid,
+      wifiPassword: deviceSettings.pendingWifiUpdate.password,
+      serverTime: Date.now()
+    };
+    // Hapus pending setelah dikirim ke ESP32
+    deviceSettings.pendingWifiUpdate = null;
+    saveSettings();
+    addLog('SYSTEM', 'INFO', `Instruksi ganti WiFi terkirim ke ESP32 -> SSID: ${updatePayload.wifiSsid}`);
+    return res.status(200).json(updatePayload);
+  }
+
+  // 2. Cek apakah ada antrean order PAID
   if (currentState.status === 'PAID' && currentState.activeOrder) {
     return res.status(200).json({
       status: 'PAID',
@@ -407,7 +373,7 @@ app.get('/api/esp32/check-order', (req, res) => {
     });
   }
 
-  // Jika sedang mengisi atau idle
+  // 3. Status Standby / IDLE
   return res.status(200).json({
     status: currentState.status === 'FILLING' ? 'FILLING' : 'IDLE',
     orderId: currentState.activeOrder ? currentState.activeOrder.orderId : null,
@@ -416,19 +382,12 @@ app.get('/api/esp32/check-order', (req, res) => {
   });
 });
 
-/**
- * Endpoint: /api/esp32/finish-fill
- * Dipanggil oleh ESP32 setelah flow sensor mencapai target liter atau terjadi emergency stop.
- */
 app.post('/api/esp32/finish-fill', (req, res) => {
   try {
     const { orderId, dispensedLiter, durationSeconds, status: fillStatus } = req.body;
-    console.log('--- ESP32 FINISH-FILL RECEIVED ---', req.body);
-
     const actualLiter = Number(dispensedLiter) || 0;
     const isEmergency = fillStatus === 'EMERGENCY_STOP';
 
-    // Cari order
     const order = transactions.find(t => t.orderId === orderId);
     if (order) {
       order.status = isEmergency ? 'STOPPED' : 'COMPLETED';
@@ -438,19 +397,16 @@ app.post('/api/esp32/finish-fill', (req, res) => {
       saveTransactions();
     }
 
-    // Catat log
     if (isEmergency) {
-      addLog('ESP32', 'WARNING', `PENGISIAN DIHENTIKAN DARURAT (Emergency Button)! Order: ${orderId}, Terisi: ${actualLiter}L`, req.body);
+      addLog('ESP32', 'WARNING', `Pengisian dihentikan darurat: ${orderId} (${actualLiter}L)`, req.body);
     } else {
-      addLog('ESP32', 'SUCCESS', `Pengisian Air Selesai! Order: ${orderId}, Total Terisi: ${actualLiter}L (${durationSeconds || 0}s)`, req.body);
+      addLog('ESP32', 'SUCCESS', `Pengisian Air Selesai: ${orderId} (${actualLiter}L)`, req.body);
     }
 
-    // Reset status depot kembali ke IDLE
     currentState.status = 'IDLE';
     currentState.activeOrder = null;
     updateTodayStats();
 
-    // Broadcast ke frontend
     io.emit('order:completed', {
       orderId,
       dispensedLiter: actualLiter,
@@ -459,25 +415,15 @@ app.post('/api/esp32/finish-fill', (req, res) => {
     });
     io.emit('system:state', currentState);
 
-    return res.status(200).json({
-      success: true,
-      message: isEmergency ? 'Emergency stop acknowledged. System reset to IDLE.' : 'Refill completed successfully. System reset to IDLE.',
-      status: 'IDLE'
-    });
+    return res.status(200).json({ success: true, status: 'IDLE' });
   } catch (error) {
-    console.error('Error in finish-fill:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 });
 
-/**
- * Endpoint Telemetri Live (Optional dipanggil ESP32 saat proses mengisi untuk live gauge di web)
- */
 app.post('/api/esp32/telemetry', (req, res) => {
   const { currentLiter, flowRate, pulses, orderId } = req.body;
-  if (currentState.status === 'PAID') {
-    currentState.status = 'FILLING';
-  }
+  if (currentState.status === 'PAID') currentState.status = 'FILLING';
   
   io.emit('esp32:telemetry', {
     orderId: orderId || (currentState.activeOrder ? currentState.activeOrder.orderId : null),
@@ -490,9 +436,46 @@ app.post('/api/esp32/telemetry', (req, res) => {
   return res.json({ ok: true });
 });
 
-/**
- * Endpoint Emergency Stop dari Web Dashboard
- */
+// Endpoint untuk Dashboard mengubah konfigurasi WiFi ESP32
+app.post('/api/device/save-wifi', (req, res) => {
+  const { ssid, password } = req.body;
+  if (!ssid) {
+    return res.status(400).json({ success: false, message: 'Nama WiFi (SSID) tidak boleh kosong!' });
+  }
+
+  deviceSettings.wifiSsid = ssid;
+  deviceSettings.wifiPassword = password || '';
+  deviceSettings.pendingWifiUpdate = {
+    ssid,
+    password: password || '',
+    updatedAt: new Date().toISOString()
+  };
+  saveSettings();
+
+  addLog('DASHBOARD', 'SUCCESS', `Pengaturan WiFi baru disimpan di Web: SSID "${ssid}". Perintah update dijadwalkan ke ESP32.`);
+
+  return res.json({
+    success: true,
+    message: `Pengaturan WiFi untuk "${ssid}" berhasil disimpan. ESP32 akan otomatis berganti ke WiFi baru pada polling berikutnya!`,
+    data: {
+      ssid: deviceSettings.wifiSsid,
+      hasPassword: Boolean(deviceSettings.wifiPassword)
+    }
+  });
+});
+
+app.get('/api/device/settings', (req, res) => {
+  return res.json({
+    success: true,
+    data: {
+      wifiSsid: deviceSettings.wifiSsid,
+      hasPassword: Boolean(deviceSettings.wifiPassword),
+      pendingWifiUpdate: Boolean(deviceSettings.pendingWifiUpdate),
+      esp32CurrentSsid: currentState.esp32CurrentSsid
+    }
+  });
+});
+
 app.post('/api/depot/emergency-stop', (req, res) => {
   const previousOrder = currentState.activeOrder;
   currentState.status = 'IDLE';
@@ -510,14 +493,11 @@ app.post('/api/depot/emergency-stop', (req, res) => {
   addLog('DASHBOARD', 'WARNING', 'Emergency Stop diaktifkan manual dari Dashboard!');
   io.emit('system:state', currentState);
 
-  return res.json({
-    success: true,
-    message: 'Emergency Stop berhasil dieksekusi, sistem direset ke IDLE'
-  });
+  return res.json({ success: true, message: 'Emergency Stop dieksekusi' });
 });
 
 // ==========================================
-// 3. DASHBOARD MONITORING & STATS API
+// 3. STATS & STATIC ASSETS
 // ==========================================
 
 app.get('/api/status', (req, res) => {
@@ -530,28 +510,20 @@ app.get('/api/status', (req, res) => {
       publicBaseUrl: PUBLIC_BASE_URL,
       webhookEndpoint: `${PUBLIC_BASE_URL}/api/dana/finish-notify`,
       esp32CheckEndpoint: `${PUBLIC_BASE_URL}/api/esp32/check-order`,
-      esp32FinishEndpoint: `${PUBLIC_BASE_URL}/api/esp32/finish-fill`
+      esp32FinishEndpoint: `${PUBLIC_BASE_URL}/api/esp32/finish-fill`,
+      configuredWifiSsid: deviceSettings.wifiSsid
     }
   });
 });
 
 app.get('/api/transactions', (req, res) => {
-  return res.json({
-    success: true,
-    total: transactions.length,
-    data: transactions
-  });
+  return res.json({ success: true, total: transactions.length, data: transactions });
 });
 
 app.get('/api/logs', (req, res) => {
-  return res.json({
-    success: true,
-    total: auditLogs.length,
-    data: auditLogs
-  });
+  return res.json({ success: true, total: auditLogs.length, data: auditLogs });
 });
 
-// Serve frontend static files if built
 const clientDistPath = path.join(__dirname, 'client', 'dist');
 if (fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath));
@@ -563,7 +535,6 @@ if (fs.existsSync(clientDistPath)) {
   app.use(express.static(path.join(__dirname, 'public')));
 }
 
-// WebSocket Connection Handler
 io.on('connection', (socket) => {
   socket.emit('system:state', currentState);
   socket.emit('init:data', {
@@ -571,23 +542,9 @@ io.on('connection', (socket) => {
     logs: auditLogs.slice(0, 50),
     state: currentState
   });
-
-  socket.on('request:refresh', () => {
-    updateTodayStats();
-    socket.emit('system:state', currentState);
-  });
 });
 
-// Start Server
 server.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`🚀 DEPOT AIR ISI ULANG - WEBHOOK DANA SANDBOX + ESP32`);
-  console.log(`====================================================`);
-  console.log(`📡 Local Server       : http://localhost:${PORT}`);
-  console.log(`🌐 Public Base URL    : ${PUBLIC_BASE_URL}`);
-  console.log(`🔗 Webhook DANA       : ${PUBLIC_BASE_URL}/api/dana/finish-notify`);
-  console.log(`🤖 ESP32 Check Order  : ${PUBLIC_BASE_URL}/api/esp32/check-order`);
-  console.log(`💧 ESP32 Finish Fill  : ${PUBLIC_BASE_URL}/api/esp32/finish-fill`);
-  console.log(`====================================================`);
+  console.log(`🚀 Server aktif di port ${PORT} | Base URL: ${PUBLIC_BASE_URL}`);
   addLog('SYSTEM', 'INFO', `Server backend berhasil berjalan pada port ${PORT}`);
 });
