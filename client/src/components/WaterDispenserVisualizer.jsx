@@ -1,11 +1,29 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Droplet, Activity, Zap, ShieldAlert, Sparkles, Volume2, CheckCircle, Clock, Gauge, ArrowDown } from 'lucide-react';
+import { Droplet, Activity, Zap, ShieldAlert, Sparkles, Volume2, CheckCircle, Clock, Gauge, ArrowDown, Play, Pause } from 'lucide-react';
 
 export default function WaterDispenserVisualizer({ systemState, telemetry, onEmergencyStop }) {
   const isPaid = systemState?.status === 'PAID';
   const isFilling = systemState?.status === 'FILLING';
+  const isPaused = systemState?.status === 'PAUSED';
   const isIdle = systemState?.status === 'IDLE';
   const isStopped = systemState?.status === 'EMERGENCY_STOP' || systemState?.status === 'STOPPED';
+
+  const [isToggling, setIsToggling] = useState(false);
+
+  const handleToggleWater = async () => {
+    try {
+      setIsToggling(true);
+      await fetch('/api/dispenser/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'TOGGLE' })
+      });
+    } catch (err) {
+      console.error('Failed to toggle dispenser:', err);
+    } finally {
+      setIsToggling(false);
+    }
+  };
 
   const targetLiter = Number(systemState?.activeOrder?.targetLiter) || (isPaid ? 19 : 0);
   const currentLiter = Number(telemetry?.currentLiter) || 0;
@@ -174,29 +192,84 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
         {/* Right Column: Hardware Telemetry HUD Gauges */}
         <div className="lg:col-span-7 space-y-4">
           
-          {/* Active Order Card */}
-          {systemState?.activeOrder ? (
-            <div className="bg-gradient-to-r from-slate-900 via-blue-950/40 to-slate-900 p-5 rounded-2xl border border-cyan-500/30 space-y-2.5 shadow-xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+          {/* Active Order Card & Dynamic Colored Button */}
+          {(systemState?.activeOrder || isPaid || isFilling || isPaused) ? (
+            <div className={`p-5 rounded-2xl border space-y-3 shadow-2xl relative overflow-hidden transition-all duration-300 ${
+              isFilling 
+                ? 'bg-gradient-to-r from-slate-900 via-emerald-950/30 to-slate-900 border-emerald-500/40' 
+                : 'bg-gradient-to-r from-slate-900 via-rose-950/30 to-slate-900 border-rose-500/40'
+            }`}>
+              <div className={`absolute top-0 right-0 w-36 h-36 rounded-full blur-2xl pointer-events-none ${
+                isFilling ? 'bg-emerald-500/15' : 'bg-rose-500/15'
+              }`} />
+              
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-extrabold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                <span className={`text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${
+                  isFilling ? 'text-emerald-400' : 'text-rose-400'
+                }`}>
                   <Sparkles className="w-3.5 h-3.5" /> Transaksi Sedang Berjalan
                 </span>
-                <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
-                  {systemState.activeOrder.orderId}
+                <span className="text-[11px] font-mono text-slate-300 bg-slate-950 px-2.5 py-0.5 rounded-lg border border-slate-800">
+                  {systemState?.activeOrder?.orderId || 'DANA-ACTIVE'}
                 </span>
               </div>
-              <div className="flex items-baseline justify-between pt-1">
+
+              <div className="flex items-baseline justify-between pt-0.5">
                 <h3 className="text-lg font-black text-white tracking-tight">
-                  {systemState.activeOrder.title}
+                  {systemState?.activeOrder?.title || 'Isi Ulang Galon 19 Liter'}
                 </h3>
                 <span className="text-2xl font-black text-emerald-400 font-mono drop-shadow">
-                  Rp {Number(systemState.activeOrder.amount || 0).toLocaleString('id-ID')}
+                  Rp {Number(systemState?.activeOrder?.amount || 7000).toLocaleString('id-ID')}
                 </span>
               </div>
+
               <div className="text-xs text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <span>Pelanggan: <strong className="text-white">{systemState.activeOrder.customerName}</strong></span>
-                <span>Waktu Bayar: <strong className="text-cyan-300 font-mono">{new Date(systemState.activeOrder.paidAt || Date.now()).toLocaleTimeString('id-ID')}</strong></span>
+                <span>Pelanggan: <strong className="text-white">{systemState?.activeOrder?.customerName || 'Pelanggan Depot'}</strong></span>
+                <span>Waktu Bayar: <strong className="text-cyan-300 font-mono">{new Date(systemState?.activeOrder?.paidAt || Date.now()).toLocaleTimeString('id-ID')}</strong></span>
+              </div>
+
+              {/* TOMBOL WARNA DINAMIS: MERAH (SIAP/JEDA) <---> HIJAU (MENGUCUR) */}
+              <div className="pt-2">
+                {isFilling ? (
+                  <button
+                    type="button"
+                    onClick={handleToggleWater}
+                    disabled={isToggling}
+                    className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 active:scale-[0.98] text-white font-black text-sm shadow-[0_0_30px_rgba(34,197,94,0.4)] ring-4 ring-emerald-400/40 border border-emerald-300/40 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-white animate-ping" />
+                      <Pause className="w-5 h-5 fill-current" />
+                      <span className="tracking-wide">🟢 TOMBOL HIJAU: AIR SEDANG MENGUCUR</span>
+                    </div>
+                    <span className="text-[11px] font-medium text-emerald-100 opacity-90">
+                      Klik di sini atau Tekan Tombol D32 di ESP32 untuk JEDA (PAUSE)
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleToggleWater}
+                    disabled={isToggling}
+                    className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-600 active:scale-[0.98] text-white font-black text-sm shadow-[0_0_30px_rgba(239,68,68,0.4)] ring-4 ring-rose-500/40 border border-rose-300/40 animate-pulse flex flex-col items-center justify-center gap-1 transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-white" />
+                      <Play className="w-5 h-5 fill-current" />
+                      <span className="tracking-wide">
+                        {isPaused ? '🔴 TOMBOL MERAH: AIR DIJEDA' : '🔴 TOMBOL MERAH: SUDAH BAYAR & SIAP'}
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-medium text-rose-100 opacity-90">
+                      Klik di sini atau Tekan Tombol D32 di ESP32 untuk {isPaused ? 'LANJUTKAN AIR' : 'MULAI KUCURKAN AIR'}
+                    </span>
+                  </button>
+                )}
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
+                  <span>💡 Lampu Tombol Fisik: <strong className="text-rose-400">D21 (Merah)</strong> • <strong className="text-emerald-400">D22 (Hijau)</strong></span>
+                  <span>🔘 Tombol Push: <strong className="text-cyan-400 font-mono">GPIO 32</strong></span>
+                </div>
               </div>
             </div>
           ) : (

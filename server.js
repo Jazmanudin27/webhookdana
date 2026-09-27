@@ -29,8 +29,9 @@ app.use(morgan('dev'));
 
 // System State
 let currentState = {
-  status: 'IDLE', // 'IDLE' | 'PAID' | 'FILLING' | 'EMERGENCY_STOP'
+  status: 'IDLE', // 'IDLE' | 'PAID' | 'FILLING' | 'PAUSED' | 'EMERGENCY_STOP'
   activeOrder: null,
+  pendingCommand: null, // 'START' | 'PAUSE' | 'STOP'
   esp32LastSeen: null,
   esp32Ip: null,
   esp32Status: 'OFFLINE',
@@ -52,7 +53,7 @@ setInterval(() => {
   if (currentState.esp32LastSeen) {
     const elapsed = Date.now() - new Date(currentState.esp32LastSeen).getTime();
     const wasOnline = currentState.esp32Status === 'ONLINE';
-    if (elapsed > 15000) {
+    if (elapsed > 25000) {
       currentState.esp32Status = 'OFFLINE';
       if (wasOnline) {
         db.addLog('ESP32', 'WARNING', 'ESP32 Device Terputus (Heartbeat Timeout)');
@@ -278,6 +279,31 @@ app.get('/api/esp32/check-order', async (req, res) => {
     currentState.esp32CurrentSsid = req.query.ssid;
   }
 
+  // Terima telemetry & sync status dari ESP32 jika dikirim
+  if (req.query.currentLiter !== undefined) {
+    const curLiter = parseFloat(req.query.currentLiter) || 0;
+    const curFlow = parseFloat(req.query.flowRate) || 0;
+    const devState = req.query.state; // 'FILLING' | 'PAUSED' | 'WAITING' | 'IDLE'
+
+    if (devState === 'FILLING' && currentState.status !== 'FILLING') {
+      currentState.status = 'FILLING';
+      io.emit('system:state', currentState);
+    } else if (devState === 'PAUSED' && currentState.status !== 'PAUSED') {
+      currentState.status = 'PAUSED';
+      io.emit('system:state', currentState);
+    } else if (devState === 'WAITING' && currentState.status !== 'PAID') {
+      currentState.status = 'PAID';
+      io.emit('system:state', currentState);
+    }
+
+    io.emit('esp32:telemetry', {
+      orderId: currentState.activeOrder ? currentState.activeOrder.orderId : (req.query.orderId || null),
+      currentLiter: curLiter,
+      flowRate: curFlow,
+      timestamp: Date.now()
+    });
+  }
+
   // 1. Cek Instruksi Ganti WiFi
   const pendingWifi = await db.getSetting('pending_wifi_update');
   if (pendingWifi && pendingWifi.ssid) {
@@ -293,10 +319,22 @@ app.get('/api/esp32/check-order', async (req, res) => {
     return res.status(200).json(updatePayload);
   }
 
-  // 2. Cek Order PAID
-  if (currentState.status === 'PAID' && currentState.activeOrder) {
+  // 1.5. Cek Perintah Kucur Air dari Web (START / PAUSE / RESUME / STOP)
+  if (currentState.pendingCommand) {
+    const cmd = currentState.pendingCommand;
+    currentState.pendingCommand = null;
     return res.status(200).json({
-      status: 'PAID',
+      status: cmd, // 'START' | 'PAUSE' | 'RESUME' | 'STOP'
+      orderId: currentState.activeOrder ? currentState.activeOrder.orderId : null,
+      targetLiter: currentState.activeOrder ? currentState.activeOrder.targetLiter : 0,
+      serverTime: Date.now()
+    });
+  }
+
+  // 2. Cek Order PAID / PAUSED
+  if ((currentState.status === 'PAID' || currentState.status === 'PAUSED') && currentState.activeOrder) {
+    return res.status(200).json({
+      status: currentState.status,
       orderId: currentState.activeOrder.orderId,
       targetLiter: currentState.activeOrder.targetLiter,
       price: currentState.activeOrder.amount,
@@ -305,13 +343,41 @@ app.get('/api/esp32/check-order', async (req, res) => {
     });
   }
 
-  // 3. Standby / IDLE
+  // 3. Standby / IDLE / FILLING
   return res.status(200).json({
     status: currentState.status === 'FILLING' ? 'FILLING' : 'IDLE',
     orderId: currentState.activeOrder ? currentState.activeOrder.orderId : null,
     targetLiter: currentState.activeOrder ? currentState.activeOrder.targetLiter : 0,
     serverTime: Date.now()
   });
+});
+
+// Endpoint Kontrol Tombol Kucur Air dari Web
+app.post('/api/dispenser/action', (req, res) => {
+  const { action } = req.body; // 'TOGGLE' | 'START' | 'PAUSE' | 'RESUME' | 'STOP'
+  
+  if (action === 'TOGGLE') {
+    if (currentState.status === 'PAID' || currentState.status === 'PAUSED') {
+      currentState.status = 'FILLING';
+      currentState.pendingCommand = 'START';
+    } else if (currentState.status === 'FILLING') {
+      currentState.status = 'PAUSED';
+      currentState.pendingCommand = 'PAUSE';
+    }
+  } else if (action === 'START' || action === 'RESUME') {
+    currentState.status = 'FILLING';
+    currentState.pendingCommand = 'START';
+  } else if (action === 'PAUSE') {
+    currentState.status = 'PAUSED';
+    currentState.pendingCommand = 'PAUSE';
+  } else if (action === 'STOP') {
+    currentState.status = 'IDLE';
+    currentState.activeOrder = null;
+    currentState.pendingCommand = 'STOP';
+  }
+
+  io.emit('system:state', currentState);
+  return res.json({ success: true, status: currentState.status });
 });
 
 app.post('/api/esp32/finish-fill', async (req, res) => {
@@ -352,16 +418,27 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
 });
 
 app.post('/api/esp32/telemetry', (req, res) => {
-  const { currentLiter, flowRate, pulses, orderId, isFilling, isWaitingButton } = req.body;
+  const { currentLiter, flowRate, pulses, orderId, isFilling, isWaitingButton, isPaused, state } = req.body;
   
-  // Refresh Heartbeat ESP32 agar status selalu ONLINE saat mengisi air
+  // Refresh Heartbeat ESP32 agar status selalu ONLINE
   currentState.esp32LastSeen = new Date().toISOString();
   currentState.esp32Status = 'ONLINE';
 
-  if (isWaitingButton) {
-    currentState.status = 'PAID';
-  } else if (isFilling) {
-    currentState.status = 'FILLING';
+  if (state === 'PAUSED' || isPaused) {
+    if (currentState.status !== 'PAUSED') {
+      currentState.status = 'PAUSED';
+      io.emit('system:state', currentState);
+    }
+  } else if (state === 'FILLING' || isFilling) {
+    if (currentState.status !== 'FILLING') {
+      currentState.status = 'FILLING';
+      io.emit('system:state', currentState);
+    }
+  } else if (state === 'WAITING' || isWaitingButton) {
+    if (currentState.status !== 'PAID') {
+      currentState.status = 'PAID';
+      io.emit('system:state', currentState);
+    }
   }
   
   io.emit('esp32:telemetry', {

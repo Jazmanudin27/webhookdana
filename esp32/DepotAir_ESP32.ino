@@ -1,12 +1,15 @@
 /*
   ===========================================================================================
-  PROYEK   : DEPOT AIR ISI ULANG OTOMATIS - DANA.ASPARTECH.COM (FIXED)
+  PROYEK   : DEPOT AIR ISI ULANG OTOMATIS - DANA.ASPARTECH.COM
+  HARDWARE : ESP32 Dev Module (WROOM-32)
   PINOUT   : 
-    - GPIO 18 : Water Flow Sensor YF-S201 (Signal Kuning)
-    - GPIO 26 : Relay Solenoid Valve 12V (IN Relay)
+    - GPIO 34 : Water Flow Sensor YF-S201 (Kabel Sinyal Kuning)
+    - GPIO 26 : Relay Solenoid Valve 12V (IN Relay - Active LOW)
+    - GPIO 32 : Tombol Kucur Air / Jeda (Push Button ke GND)
+    - GPIO 21 : Lampu LED Merah Tombol (Menyala saat Siap/Bayar & saat Dijeda)
+    - GPIO 22 : Lampu LED Hijau Tombol (Menyala saat Air Mengucur)
     - GPIO 19 : Active Buzzer 5V
-    - GPIO 4  : Tombol Emergency Stop (Push Button ke GND)
-    - GPIO 2  : Built-in LED Status
+    - GPIO 2  : Built-in Blue LED ESP32
   ===========================================================================================
 */
 
@@ -33,7 +36,6 @@ const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 // Endpoint API
 String urlCheckOrder = String(BASE_SERVER_URL) + "/api/esp32/check-order";
 String urlFinishFill = String(BASE_SERVER_URL) + "/api/esp32/finish-fill";
-String urlTelemetry  = String(BASE_SERVER_URL) + "/api/esp32/telemetry";
 
 // Hotspot Darurat jika WiFi gagal connect
 const char* AP_SSID = "ESP32_Depot_Air";
@@ -47,10 +49,12 @@ unsigned long restartTimer = 0;
 // 2. PENETAPAN PIN ESP32
 // ==========================================================
 const int RELAY_PIN       = 26; // Relay Solenoid Valve 12V (D26)
-const int BLUE_LED_PIN    = 2;  // LED Indikator Status (D2)
-const int BUTTON_STOP_PIN = 32; // Tombol Darurat Manual (D32)
+const int BLUE_LED_PIN    = 2;  // LED Indikator Built-in (D2)
+const int BUTTON_STOP_PIN = 32; // Tombol Kucur Air / Jeda (D32)
 const int FLOW_SENSOR_PIN = 34; // Sinyal Kuning Sensor Flow YF-S201 (D34)
-const int BUZZER_PIN      = 19; // Buzzer 5V (D19) - Opsi jika nanti dipasang
+const int BUZZER_PIN      = 19; // Buzzer 5V (D19)
+const int LED_RED_PIN     = 21; // LED Merah (D21) - Warna Tombol Siap / Dijeda
+const int LED_GREEN_PIN   = 22; // LED Hijau (D22) - Warna Tombol Mengucur
 
 // Logika Relay (Active LOW)
 const int RELAY_ON  = LOW;
@@ -59,7 +63,7 @@ const int RELAY_OFF = HIGH;
 // ==========================================================
 // 3. VARIABEL FLOW SENSOR & SISTEM
 // ==========================================================
-bool isWaitingButton = false; // Order DANA sudah lunas, menunggu pembeli menekan tombol D32 untuk kucurkan air
+bool isWaitingButton = false; // Order DANA sudah lunas, menunggu pembeli menekan tombol untuk kucurkan air
 bool isFilling       = false; // Air sedang mengucur (Solenoid ON)
 bool isPaused        = false; // Pengisian dijeda sementara (Solenoid OFF)
 
@@ -74,10 +78,21 @@ unsigned long oldTime = 0;
 const float calibrationFactor = 7.5; // YF-S201
 
 unsigned long lastPollTime = 0;
-const unsigned long POLL_INTERVAL = 2000;
+const unsigned long POLL_INTERVAL = 1500; // Polling setiap 1.5 detik
 
+// Hardware Interrupt & Debounce untuk Tombol D32
+volatile bool buttonPressedFlag = false;
+volatile unsigned long lastButtonInterruptTime = 0;
 unsigned long lastDebounceTime = 0;
 bool lastButtonState = HIGH;
+
+void IRAM_ATTR buttonISR() {
+    unsigned long now = millis();
+    if (now - lastButtonInterruptTime > 250) {
+        buttonPressedFlag = true;
+        lastButtonInterruptTime = now;
+    }
+}
 
 void IRAM_ATTR pulseCounter() {
     pulseCount++;
@@ -92,6 +107,26 @@ void triggerBuzzer(int beepCount, int durationMs = 80, int pauseMs = 80) {
     }
 }
 
+// Mengatur Lampu Tombol: Merah (Siap/Jeda) vs Hijau (Mengucur)
+void updateLeds() {
+    if (isWaitingButton || (isFilling && isPaused)) {
+        // Status SIAP / JEDA -> 🔴 TOMBOL WARNA MERAH!
+        digitalWrite(LED_RED_PIN, HIGH);
+        digitalWrite(LED_GREEN_PIN, LOW);
+        digitalWrite(BLUE_LED_PIN, (millis() / 300) % 2 == 0 ? HIGH : LOW);
+    } else if (isFilling && !isPaused) {
+        // Status MENGUCUR -> 🟢 TOMBOL WARNA HIJAU!
+        digitalWrite(LED_RED_PIN, LOW);
+        digitalWrite(LED_GREEN_PIN, HIGH);
+        digitalWrite(BLUE_LED_PIN, HIGH);
+    } else {
+        // Standby normal (Belum ada order)
+        digitalWrite(LED_RED_PIN, LOW);
+        digitalWrite(LED_GREEN_PIN, LOW);
+        digitalWrite(BLUE_LED_PIN, WiFi.status() == WL_CONNECTED ? HIGH : LOW);
+    }
+}
+
 // ==========================================================
 // 4. MEMUAT & MENYIMPAN WIFI DARI FLASH NVS
 // ==========================================================
@@ -101,7 +136,7 @@ void loadStoredWiFi() {
     String storedPASS = preferences.getString("pass", "");
     preferences.end();
 
-    // Jika di memori NVS masih tersimpan hotspot lama "Jazz" atau "Ade", pastikan terhubung ke Ade dengan password baru
+    // Migrasi otomatis jika masih tersimpan konfigurasi lama
     if (storedSSID == "Jazz" || storedSSID == "Ade") {
         saveWiFiToNVS("Ade", "19052026");
         storedSSID = "Ade";
@@ -141,7 +176,6 @@ bool connectToWiFi(int timeoutSeconds = 15) {
     Serial.println("-------------------------------------------------");
     Serial.flush();
 
-    // Reset radio WiFi agar tidak crash/stuck
     WiFi.persistent(false);
     WiFi.disconnect(true, true);
     delay(200);
@@ -155,7 +189,7 @@ bool connectToWiFi(int timeoutSeconds = 15) {
 
     while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime < (unsigned long)timeoutSeconds * 1000)) {
         delay(250);
-        yield(); // Mencegah Watchdog Timer (TG1WDT) Reset
+        yield();
         Serial.print(".");
         Serial.flush();
     }
@@ -171,7 +205,6 @@ bool connectToWiFi(int timeoutSeconds = 15) {
         return true;
     } else {
         Serial.println("\n[WIFI] Gagal terhubung!");
-        Serial.print("[WIFI] Status Code: "); Serial.println(WiFi.status());
         digitalWrite(BLUE_LED_PIN, LOW);
         return false;
     }
@@ -237,15 +270,16 @@ void prepareOrder(String orderId, float targetLiters) {
     isFilling = false;
     isPaused = false;
     
-    // Pastikan solenoid tertutup rapat sebelum pembeli menekan tombol
+    // Pastikan solenoid tertutup rapat sebelum tombol ditekan
     digitalWrite(RELAY_PIN, RELAY_OFF);
+    updateLeds(); // 🔴 Tombol berubah jadi MERAH (Siap & Bayar)
     
     Serial.println("\n========================================================");
     Serial.println("📢 [PEMBAYARAN DANA BERHASIL DITERIMA]");
     Serial.printf("📦 Order ID   : %s\n", orderId.c_str());
     Serial.printf("🚰 Target Air : %.2f Liter\n", targetLiters);
-    Serial.println("👉 Silakan letakkan galon / botol di bawah keran!");
-    Serial.println("👉 TEKAN TOMBOL (D32) untuk MULAI MENGUCURKAN AIR.");
+    Serial.println("🔴 TOMBOL MERAH MENYALA (D21) -> Siap & Bayar");
+    Serial.println("👉 Letakkan galon, lalu TEKAN TOMBOL (D32) untuk MULAI!");
     Serial.println("========================================================");
     
     triggerBuzzer(2, 120, 80);
@@ -257,32 +291,12 @@ void notifyServerFinished(bool isFinishedSuccess) {
     HTTPClient http;
     http.begin(secureClient, urlFinishFill);
     http.addHeader("Content-Type", "application/json");
+    http.setTimeout(3000);
 
     StaticJsonDocument<256> doc;
     doc["orderId"]         = currentOrderId;
     doc["dispensedLiter"]  = (float)currentFillMl / 1000.0;
     doc["status"]          = isFinishedSuccess ? "COMPLETED" : "EMERGENCY_STOP";
-
-    String jsonBody;
-    serializeJson(doc, jsonBody);
-
-    http.POST(jsonBody);
-    http.end();
-}
-
-void sendLiveTelemetry() {
-    if (WiFi.status() != WL_CONNECTED) return;
-
-    HTTPClient http;
-    http.begin(secureClient, urlTelemetry);
-    http.addHeader("Content-Type", "application/json");
-
-    StaticJsonDocument<256> doc;
-    doc["orderId"]         = currentOrderId;
-    doc["currentLiter"]    = (float)currentFillMl / 1000.0;
-    doc["flowRate"]        = flowRate;
-    doc["isFilling"]       = (isFilling && !isPaused);
-    doc["isWaitingButton"] = isWaitingButton;
 
     String jsonBody;
     serializeJson(doc, jsonBody);
@@ -297,12 +311,12 @@ void stopFilling(bool isFinishedSuccess = true) {
     isPaused = false;
     
     digitalWrite(RELAY_PIN, RELAY_OFF);
-    digitalWrite(BLUE_LED_PIN, LOW);
+    updateLeds(); // Matikan LED tombol (Standby)
     
     if (isFinishedSuccess) {
         Serial.println("\n🎉🎉🎉 [PENGISIAN AIR SELESAI OTOMATIS!] 🎉🎉🎉");
         Serial.printf("✅ Total Terisi : %.2f Liter\n", (float)currentFillMl / 1000.0);
-        Serial.println("Keran telah ditutup rapat. Terima kasih!");
+        Serial.println("Keran telah ditutup rapat. Lampu tombol mati. Selesai!");
         triggerBuzzer(4, 150, 100);
         notifyServerFinished(true);
     } else {
@@ -316,54 +330,63 @@ void stopFilling(bool isFinishedSuccess = true) {
     currentFillMl = 0;
 }
 
-// Handler Tombol Fisik (D32)
+// Handler Tombol (D32 & Perintah Web):
+// 1. Bayar/Siap -> Tekan -> Buka Keran & 🟢 HIJAU
+// 2. Mengalir   -> Tekan -> Tutup Keran (Jeda) & 🔴 MERAH
+// 3. Jeda       -> Tekan -> Buka Keran (Lanjut) & 🟢 HIJAU
 void handleButtonPress() {
-    Serial.println("\n🔘 [TOMBOL D32 DITEKAN!]");
+    Serial.println("\n🔘 [AKSI TOMBOL TERDETEKSI!]");
 
-    // 1. Jika ada order yang menunggu pembeli menekan tombol untuk kucurkan air:
+    // 1. Menunggu Pembeli Mulai (Status PAID / Ready):
     if (isWaitingButton) {
         isWaitingButton = false;
         isFilling = true;
         isPaused = false;
         
         digitalWrite(RELAY_PIN, RELAY_ON); // Buka Solenoid Valve!
-        digitalWrite(BLUE_LED_PIN, HIGH);
+        updateLeds(); // 🟢 TOMBOL BERUBAH JADI HIJAU!
 
-        Serial.println("🚰 --> KERAN DIBUKA! Air mulai mengucur ke galon...");
-        triggerBuzzer(1, 250);
+        Serial.println("🟢 --> KERAN DIBUKA! Air mulai mengucur (Lampu Hijau D22 ON)...");
+        triggerBuzzer(1, 200);
+        lastPollTime = 0; // Segera sync ke server
         return;
     }
 
-    // 2. Jika air sedang mengalir dan pembeli ingin menjeda (PAUSE):
+    // 2. Air sedang mengalir -> Pembeli mau JEDA (PAUSE):
     if (isFilling && !isPaused) {
         isPaused = true;
         digitalWrite(RELAY_PIN, RELAY_OFF); // Tutup Solenoid Valve sementara
-        Serial.println("⏸️ --> PENGISIAN DIJEDA SEMENTARA (PAUSED).");
-        Serial.printf("   Terisi: %.2f / %.2f Liter\n", (float)currentFillMl / 1000.0, (float)targetFillMl / 1000.0);
-        Serial.println("   Tekan tombol D32 lagi untuk MELANJUTKAN kucuran air.");
+        updateLeds(); // 🔴 TOMBOL BERUBAH JADI MERAH LAGI!
+
+        Serial.println("🔴 --> PENGISIAN DIJEDA (PAUSE). Keran ditutup (Lampu Merah D21 ON)...");
+        Serial.printf("   Terisi saat ini: %.2f / %.2f Liter\n", (float)currentFillMl / 1000.0, (float)targetFillMl / 1000.0);
+        Serial.println("   Tekan tombol lagi untuk MELANJUTKAN kucuran air.");
         triggerBuzzer(2, 100, 80);
+        lastPollTime = 0; // Segera sync ke server
         return;
     }
 
-    // 3. Jika sedang jeda dan pembeli ingin melanjutkan kucuran air (RESUME):
+    // 3. Sedang Jeda -> Pembeli mau LANJUTKAN (RESUME):
     if (isFilling && isPaused) {
         isPaused = false;
         digitalWrite(RELAY_PIN, RELAY_ON); // Buka Solenoid Valve lagi!
-        digitalWrite(BLUE_LED_PIN, HIGH);
-        Serial.println("▶️ --> MELANJUTKAN PENGISIAN AIR...");
+        updateLeds(); // 🟢 TOMBOL BERUBAH JADI HIJAU LAGI!
+
+        Serial.println("🟢 --> MELANJUTKAN PENGISIAN AIR! Keran dibuka lagi (Lampu Hijau D22 ON)...");
         triggerBuzzer(1, 200);
+        lastPollTime = 0; // Segera sync ke server
         return;
     }
 
-    // 4. Jika sedang Standby (belum ada pembayaran DANA):
-    Serial.println("ℹ️ Tombol D32 terdeteksi normal! (Status: Standby, belum ada pembayaran DANA).");
+    // 4. Standby normal (Belum ada order DANA):
+    Serial.println("ℹ️ Tombol D32 berfungsi normal (Standby - silakan bayar via DANA terlebih dahulu).");
     digitalWrite(BLUE_LED_PIN, HIGH);
-    delay(150);
+    delay(100);
     digitalWrite(BLUE_LED_PIN, LOW);
 }
 
 // ==========================================================
-// 8. POLLING CLOUD SERVER
+// 8. UNIFIED POLLING & TELEMETRY (1 KONEKSI RINGAN, TIDAK PERNAH OFFLINE)
 // ==========================================================
 void checkOrderFromServer() {
     if (WiFi.status() != WL_CONNECTED) {
@@ -372,11 +395,29 @@ void checkOrderFromServer() {
         return;
     }
 
+    // Tentukan status saat ini untuk dikirim ke server
+    String stateStr = "IDLE";
+    if (isWaitingButton) {
+        stateStr = "WAITING";
+    } else if (isFilling && isPaused) {
+        stateStr = "PAUSED";
+    } else if (isFilling && !isPaused) {
+        stateStr = "FILLING";
+    }
+
+    // Kirim telemetry + polling perintah sekaligus dalam 1 request cepat
+    String url = urlCheckOrder + "?ssid=" + wifi_ssid + 
+                 "&state=" + stateStr + 
+                 "&currentLiter=" + String((float)currentFillMl / 1000.0, 2) + 
+                 "&flowRate=" + String(flowRate, 1);
+
+    if (currentOrderId.length() > 0) {
+        url += "&orderId=" + currentOrderId;
+    }
+
     HTTPClient http;
-    String url = urlCheckOrder + "?ssid=" + wifi_ssid;
-    
     http.begin(secureClient, url);
-    http.setTimeout(4000);
+    http.setTimeout(2500); // 2.5 detik max agar tidak pernah hang
 
     int httpCode = http.GET();
 
@@ -389,6 +430,7 @@ void checkOrderFromServer() {
         if (!error) {
             const char* status = doc["status"];
             
+            // Perintah ganti WiFi dari Web Dashboard
             if (status && strcmp(status, "UPDATE_WIFI") == 0) {
                 String newSsid = doc["wifiSsid"].as<String>();
                 String newPass = doc["wifiPassword"].as<String>();
@@ -406,18 +448,31 @@ void checkOrderFromServer() {
                 return;
             }
 
-            if (status && strcmp(status, "PAID") == 0) {
+            // Perintah MULAI / LANJUT dari Web
+            if (status && (strcmp(status, "START") == 0 || strcmp(status, "RESUME") == 0)) {
+                if (isWaitingButton || (isFilling && isPaused)) {
+                    Serial.println("🌐 [WEB KLIK] Tombol Kucur Air ditekan dari Dashboard!");
+                    handleButtonPress();
+                }
+            } 
+            // Perintah JEDA dari Web
+            else if (status && strcmp(status, "PAUSE") == 0) {
+                if (isFilling && !isPaused) {
+                    Serial.println("🌐 [WEB KLIK] Tombol Jeda ditekan dari Dashboard!");
+                    handleButtonPress();
+                }
+            } 
+            // Order DANA Baru Saja Lunas
+            else if (status && strcmp(status, "PAID") == 0) {
                 String orderId = doc["orderId"].as<String>();
                 float targetLiters = doc["targetLiter"].as<float>();
 
-                // Hanya proses jika order ID ini baru dan belum ditangani
                 if (orderId != currentOrderId) {
                     prepareOrder(orderId, targetLiters);
                 }
-            }
-
-            // Jika tombol Emergency Stop di Web ditekan (status jadi IDLE / EMERGENCY_STOP)
-            if (status && (strcmp(status, "IDLE") == 0 || strcmp(status, "EMERGENCY_STOP") == 0)) {
+            } 
+            // Perintah Darurat Berhenti dari Web
+            else if (status && (strcmp(status, "IDLE") == 0 || strcmp(status, "EMERGENCY_STOP") == 0 || strcmp(status, "STOP") == 0)) {
                 if (isFilling || isWaitingButton) {
                     Serial.println("\n🛑 [WEB EMERGENCY STOP] Pembatalan diterima dari Website!");
                     stopFilling(false);
@@ -436,7 +491,7 @@ void setup() {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
 
     Serial.begin(115200);
-    delay(1000);
+    delay(800);
 
     Serial.println("\n=================================================");
     Serial.println("💧 ESP32 DEPOT AIR OTOMATIS - DANA.ASPARTECH.COM");
@@ -451,6 +506,12 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);
     digitalWrite(BUZZER_PIN, LOW);
 
+    pinMode(LED_RED_PIN, OUTPUT);
+    digitalWrite(LED_RED_PIN, LOW);
+
+    pinMode(LED_GREEN_PIN, OUTPUT);
+    digitalWrite(LED_GREEN_PIN, LOW);
+
     secureClient.setInsecure();
 
     loadStoredWiFi();
@@ -459,9 +520,14 @@ void setup() {
         startEmergencyAP();
     }
 
+    // Tombol D32: INPUT_PULLUP + Hardware Interrupt (FALLING ke GND)
     pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_STOP_PIN), buttonISR, FALLING);
+
     pinMode(FLOW_SENSOR_PIN, INPUT);
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
+
+    updateLeds();
 }
 
 // ==========================================================
@@ -477,13 +543,30 @@ void loop() {
         return;
     }
 
-    // Polling server rutin setiap 2 detik (Heartbeat selalu aktif di semua kondisi: Standby, Filling, Paused!)
+    // 1. Deteksi Hardware Interrupt Tombol D32
+    if (buttonPressedFlag) {
+        buttonPressedFlag = false;
+        handleButtonPress();
+    }
+
+    // 2. Deteksi Tombol D32 via Polling DigitalRead (Cadangan jika interrupt terlewat)
+    int btnRead = digitalRead(BUTTON_STOP_PIN);
+    if (btnRead == LOW && lastButtonState == HIGH) {
+        if (millis() - lastDebounceTime > 250) {
+            lastDebounceTime = millis();
+            handleButtonPress();
+        }
+    }
+    lastButtonState = btnRead;
+
+    // 3. Polling server rutin (Setiap 1.5 detik di SEMUA status: Standby, Waiting, Filling, Paused)
+    //    Memastikan ESP32 SELALU 🟢 ONLINE dan telemetry terkirim real-time
     if (millis() - lastPollTime >= POLL_INTERVAL) {
         lastPollTime = millis();
         checkOrderFromServer();
     }
 
-    // Hitung volume air setiap 1 detik
+    // 4. Hitung debit dan volume air setiap 1 detik saat pengisian aktif
     if ((millis() - oldTime) > 1000) {
         detachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN));
         
@@ -508,29 +591,8 @@ void loop() {
         
         pulseCount = 0;
         attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
-
-        // Selalu kirim telemetry ke server agar status dashboard selalu 🟢 ONLINE
-        if (isWaitingButton || isFilling) {
-            sendLiveTelemetry();
-        }
     }
 
-    // Indikator LED Status D2
-    if (isWaitingButton) {
-        digitalWrite(BLUE_LED_PIN, (millis() / 250) % 2 == 0 ? HIGH : LOW); // Kedip cepat: Menunggu tombol ditekan
-    } else if (isFilling && isPaused) {
-        digitalWrite(BLUE_LED_PIN, (millis() / 600) % 2 == 0 ? HIGH : LOW); // Kedip pelan: Pengisian dijeda
-    } else if (isFilling) {
-        digitalWrite(BLUE_LED_PIN, HIGH); // Solid ON: Air sedang mengucur
-    }
-
-    // Pembacaan Tombol D32 (Active LOW dengan internal pullup)
-    int btnRead = digitalRead(BUTTON_STOP_PIN);
-    if (btnRead == LOW && lastButtonState == HIGH) {
-        if (millis() - lastDebounceTime > 250) {
-            lastDebounceTime = millis();
-            handleButtonPress();
-        }
-    }
-    lastButtonState = btnRead;
+    // 5. Update lampu LED tombol (Merah vs Hijau)
+    updateLeds();
 }
