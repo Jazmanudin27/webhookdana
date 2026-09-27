@@ -52,7 +52,7 @@ setInterval(() => {
   if (currentState.esp32LastSeen) {
     const elapsed = Date.now() - new Date(currentState.esp32LastSeen).getTime();
     const wasOnline = currentState.esp32Status === 'ONLINE';
-    if (elapsed > 10000) {
+    if (elapsed > 15000) {
       currentState.esp32Status = 'OFFLINE';
       if (wasOnline) {
         db.addLog('ESP32', 'WARNING', 'ESP32 Device Terputus (Heartbeat Timeout)');
@@ -352,8 +352,17 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
 });
 
 app.post('/api/esp32/telemetry', (req, res) => {
-  const { currentLiter, flowRate, pulses, orderId } = req.body;
-  if (currentState.status === 'PAID') currentState.status = 'FILLING';
+  const { currentLiter, flowRate, pulses, orderId, isFilling, isWaitingButton } = req.body;
+  
+  // Refresh Heartbeat ESP32 agar status selalu ONLINE saat mengisi air
+  currentState.esp32LastSeen = new Date().toISOString();
+  currentState.esp32Status = 'ONLINE';
+
+  if (isWaitingButton) {
+    currentState.status = 'PAID';
+  } else if (isFilling) {
+    currentState.status = 'FILLING';
+  }
   
   io.emit('esp32:telemetry', {
     orderId: orderId || (currentState.activeOrder ? currentState.activeOrder.orderId : null),
@@ -363,7 +372,7 @@ app.post('/api/esp32/telemetry', (req, res) => {
     timestamp: Date.now()
   });
 
-  return res.json({ ok: true });
+  return res.json({ ok: true, status: currentState.status });
 });
 
 // WiFi Settings Endpoint

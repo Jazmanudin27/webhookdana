@@ -71,7 +71,7 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              ESP32 Automatic Solenoid (GPIO 26) & Flow Sensor Metering (GPIO 18)
+              ESP32 Solenoid (GPIO 26) • Flow Sensor (GPIO 34) • Tombol Kucur Air (GPIO 32)
             </p>
           </div>
         </div>
@@ -244,7 +244,7 @@ export default function WaterDispenserVisualizer({ systemState, telemetry, onEme
               <div className="text-sm font-black font-mono text-white">
                 {telemetry?.flowRate ? telemetry.flowRate.toFixed(1) : (isFilling ? '4.8' : '0.0')} <span className="text-[10px] text-slate-400 font-normal">L/min</span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono mt-1 block">GPIO 18 (YF-S201)</span>
+              <span className="text-[10px] text-slate-500 font-mono mt-1 block">GPIO 34 (YF-S201)</span>
             </div>
 
             {/* Card 3: Buzzer Alert */}

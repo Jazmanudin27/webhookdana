@@ -97,29 +97,29 @@ export default function HardwareConfigGuide({ baseUrl = 'https://dana.aspartech.
               </thead>
               <tbody className="divide-y divide-slate-800/70 font-mono">
                 <tr>
-                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 18</td>
+                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 34 (D34)</td>
                   <td className="py-2 px-3 font-sans text-slate-200">Water Flow Sensor (YF-S201)</td>
-                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Interrupt Hitung Pulsa</td>
+                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Sinyal Kuning Hitung Liter</td>
                 </tr>
                 <tr>
-                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 26</td>
-                  <td className="py-2 px-3 font-sans text-slate-200">Relay Solenoid Valve</td>
-                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Kontrol Aliran Air 12V</td>
+                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 32 (D32)</td>
+                  <td className="py-2 px-3 font-sans text-slate-200">Tombol Kucurkan Air / Jeda</td>
+                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Tekan Mulai Ngocor / Pause</td>
                 </tr>
                 <tr>
-                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 19</td>
+                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 26 (D26)</td>
+                  <td className="py-2 px-3 font-sans text-slate-200">Relay Solenoid Valve 12V</td>
+                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Buka / Tutup Keran Air</td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 19 (D19)</td>
                   <td className="py-2 px-3 font-sans text-slate-200">Active Buzzer 5V</td>
-                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">1x Mulai / 4x Selesai</td>
+                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">1x Mulai / 4x Selesai (Opsional)</td>
                 </tr>
                 <tr>
-                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 4</td>
-                  <td className="py-2 px-3 font-sans text-slate-200">Tombol Emergency Stop</td>
-                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Stop Manual Seketika</td>
-                </tr>
-                <tr>
-                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 2</td>
+                  <td className="py-2 px-3 text-cyan-300 font-bold">GPIO 2 (D2)</td>
                   <td className="py-2 px-3 font-sans text-slate-200">Built-in LED ESP32</td>
-                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Indikator WiFi & Flow</td>
+                  <td className="py-2 px-3 font-sans text-slate-400 text-[11px]">Indikator WiFi & Status</td>
                 </tr>
               </tbody>
             </table>
