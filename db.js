@@ -40,27 +40,17 @@ try {
 } catch (e) {}
 
 async function initDB() {
-  const dbHost = process.env.DB_HOST;
+  const dbHost = process.env.DB_HOST || '127.0.0.1';
   const dbUser = process.env.DB_USER;
   const dbPass = process.env.DB_PASS || process.env.DB_PASSWORD || '';
-  const dbName = process.env.DB_NAME || 'depot_dana';
+  const dbName = process.env.DB_NAME || 'depotair';
   const dbPort = Number(process.env.DB_PORT) || 3306;
 
   if (dbHost && dbUser) {
     try {
-      console.log(`🔌 Mencoba koneksi ke MySQL Server (${dbHost}:${dbPort}, DB: ${dbName})...`);
-      
-      // Buat koneksi awal untuk memastikan database ada
-      const tempConn = await mysql.createConnection({
-        host: dbHost,
-        user: dbUser,
-        password: dbPass,
-        port: dbPort
-      });
-      await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
-      await tempConn.end();
+      console.log(`🔌 Menghubungkan ke MySQL (${dbHost}:${dbPort}, DB: ${dbName}, User: ${dbUser})...`);
 
-      // Buat Pool ke database tujuan
+      // Buat Pool langsung ke database yang sudah di-grant hak aksesnya
       pool = mysql.createPool({
         host: dbHost,
         user: dbUser,
@@ -72,7 +62,12 @@ async function initDB() {
         queueLimit: 0
       });
 
-      // Buat Tabel Otomatis
+      // Test koneksi
+      const testConn = await pool.getConnection();
+      console.log('✅ Berhasil terkoneksi ke server MySQL.');
+      testConn.release();
+
+      // Buat Tabel Otomatis di dalam database
       await pool.query(`
         CREATE TABLE IF NOT EXISTS packages (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -83,7 +78,7 @@ async function initDB() {
           is_active TINYINT(1) DEFAULT 1,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        );
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
       await pool.query(`
@@ -105,7 +100,7 @@ async function initDB() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           paid_at DATETIME NULL,
           completed_at DATETIME NULL
-        );
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
       await pool.query(`
@@ -113,7 +108,7 @@ async function initDB() {
           setting_key VARCHAR(50) PRIMARY KEY,
           setting_value TEXT,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        );
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
       await pool.query(`
@@ -125,7 +120,7 @@ async function initDB() {
           message TEXT NOT NULL,
           payload LONGTEXT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
       // Seed paket awal jika masih kosong
@@ -140,14 +135,15 @@ async function initDB() {
       }
 
       isMySqlConnected = true;
-      console.log(`✅ DATABASE MYSQL TERHUBUNG! (Database: ${dbName})`);
+      console.log(`🎉 DATABASE MYSQL "${dbName}" SIAP DIGUNAKAN!`);
     } catch (error) {
-      console.error('⚠️ Gagal terhubung ke MySQL:', error.message);
-      console.log('🔄 Beralih menggunakan JSON Storage (data/)...');
+      console.error('⚠️ Peringatan MySQL:', error.message);
+      console.log('🔄 Server tetap berjalan normal menggunakan JSON Storage (data/)...');
       isMySqlConnected = false;
     }
   } else {
-    console.log('ℹ️ DB_HOST belum diatur di .env -> Menggunakan File JSON Storage');
+    console.log('ℹ️ Menggunakan JSON Storage (data/)');
+    isMySqlConnected = false;
   }
 }
 
@@ -156,52 +152,63 @@ async function initDB() {
 // =====================================
 async function getPackages() {
   if (isMySqlConnected) {
-    const [rows] = await pool.query('SELECT * FROM packages WHERE is_active = 1 ORDER BY liters ASC');
-    return rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      liters: Number(r.liters),
-      price: Number(r.price),
-      badge: r.badge,
-      isActive: Boolean(r.is_active)
-    }));
+    try {
+      const [rows] = await pool.query('SELECT * FROM packages WHERE is_active = 1 ORDER BY liters ASC');
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        liters: Number(r.liters),
+        price: Number(r.price),
+        badge: r.badge,
+        isActive: Boolean(r.is_active)
+      }));
+    } catch (e) {
+      console.error('MySQL getPackages error:', e.message);
+    }
   }
   return memPackages.filter(p => p.isActive);
 }
 
 async function getAllPackagesAdmin() {
   if (isMySqlConnected) {
-    const [rows] = await pool.query('SELECT * FROM packages ORDER BY liters ASC');
-    return rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      liters: Number(r.liters),
-      price: Number(r.price),
-      badge: r.badge,
-      isActive: Boolean(r.is_active)
-    }));
+    try {
+      const [rows] = await pool.query('SELECT * FROM packages ORDER BY liters ASC');
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        liters: Number(r.liters),
+        price: Number(r.price),
+        badge: r.badge,
+        isActive: Boolean(r.is_active)
+      }));
+    } catch (e) {
+      console.error('MySQL getAllPackagesAdmin error:', e.message);
+    }
   }
   return memPackages;
 }
 
 async function savePackage(pkg) {
   if (isMySqlConnected) {
-    if (pkg.id) {
-      await pool.query(
-        'UPDATE packages SET name=?, liters=?, price=?, badge=?, is_active=? WHERE id=?',
-        [pkg.name, pkg.liters, pkg.price, pkg.badge || '', pkg.isActive !== false ? 1 : 0, pkg.id]
-      );
-      return { ...pkg, id: Number(pkg.id) };
-    } else {
-      const [res] = await pool.query(
-        'INSERT INTO packages (name, liters, price, badge, is_active) VALUES (?, ?, ?, ?, ?)',
-        [pkg.name, pkg.liters, pkg.price, pkg.badge || '', 1]
-      );
-      return { ...pkg, id: res.insertId, isActive: true };
+    try {
+      if (pkg.id) {
+        await pool.query(
+          'UPDATE packages SET name=?, liters=?, price=?, badge=?, is_active=? WHERE id=?',
+          [pkg.name, pkg.liters, pkg.price, pkg.badge || '', pkg.isActive !== false ? 1 : 0, pkg.id]
+        );
+        return { ...pkg, id: Number(pkg.id) };
+      } else {
+        const [res] = await pool.query(
+          'INSERT INTO packages (name, liters, price, badge, is_active) VALUES (?, ?, ?, ?, ?)',
+          [pkg.name, pkg.liters, pkg.price, pkg.badge || '', 1]
+        );
+        return { ...pkg, id: res.insertId, isActive: true };
+      }
+    } catch (e) {
+      console.error('MySQL savePackage error:', e.message);
     }
   }
 
-  // JSON fallback
   if (pkg.id) {
     const idx = memPackages.findIndex(p => p.id === Number(pkg.id));
     if (idx !== -1) {
@@ -211,17 +218,21 @@ async function savePackage(pkg) {
     const newId = (memPackages.reduce((max, p) => Math.max(max, p.id || 0), 0)) + 1;
     memPackages.push({ ...pkg, id: newId, isActive: true });
   }
-  fs.writeFileSync(PACKAGES_FILE, JSON.stringify(memPackages, null, 2));
+  try { fs.writeFileSync(PACKAGES_FILE, JSON.stringify(memPackages, null, 2)); } catch (e) {}
   return pkg;
 }
 
 async function deletePackage(id) {
   if (isMySqlConnected) {
-    await pool.query('DELETE FROM packages WHERE id=?', [id]);
-    return true;
+    try {
+      await pool.query('DELETE FROM packages WHERE id=?', [id]);
+      return true;
+    } catch (e) {
+      console.error('MySQL deletePackage error:', e.message);
+    }
   }
   memPackages = memPackages.filter(p => p.id !== Number(id));
-  fs.writeFileSync(PACKAGES_FILE, JSON.stringify(memPackages, null, 2));
+  try { fs.writeFileSync(PACKAGES_FILE, JSON.stringify(memPackages, null, 2)); } catch (e) {}
   return true;
 }
 
@@ -230,102 +241,119 @@ async function deletePackage(id) {
 // =====================================
 async function getTransactions(limit = 100) {
   if (isMySqlConnected) {
-    const [rows] = await pool.query('SELECT * FROM transactions ORDER BY id DESC LIMIT ?', [limit]);
-    return rows.map(r => ({
-      id: r.id,
-      orderId: r.order_id,
-      merchantTransId: r.merchant_trans_id,
-      customerName: r.customer_name,
-      title: r.title,
-      targetLiter: Number(r.target_liter),
-      dispensedLiter: Number(r.dispensed_liter),
-      amount: Number(r.amount),
-      currency: r.currency,
-      status: r.status,
-      acquirementId: r.acquirement_id,
-      durationSeconds: Number(r.duration_seconds),
-      qrString: r.qr_string,
-      checkoutUrl: r.checkout_url,
-      createdAt: r.created_at,
-      paidAt: r.paid_at,
-      completedAt: r.completed_at
-    }));
+    try {
+      const [rows] = await pool.query('SELECT * FROM transactions ORDER BY id DESC LIMIT ?', [limit]);
+      return rows.map(r => ({
+        id: r.id,
+        orderId: r.order_id,
+        merchantTransId: r.merchant_trans_id,
+        customerName: r.customer_name,
+        title: r.title,
+        targetLiter: Number(r.target_liter),
+        dispensedLiter: Number(r.dispensed_liter),
+        amount: Number(r.amount),
+        currency: r.currency,
+        status: r.status,
+        acquirementId: r.acquirement_id,
+        durationSeconds: Number(r.duration_seconds),
+        qrString: r.qr_string,
+        checkoutUrl: r.checkout_url,
+        createdAt: r.created_at,
+        paidAt: r.paid_at,
+        completedAt: r.completed_at
+      }));
+    } catch (e) {
+      console.error('MySQL getTransactions error:', e.message);
+    }
   }
   return memTransactions.slice(0, limit);
 }
 
 async function findTransaction(orderId) {
   if (isMySqlConnected) {
-    const [rows] = await pool.query('SELECT * FROM transactions WHERE order_id=? OR merchant_trans_id=? LIMIT 1', [orderId, orderId]);
-    if (rows.length === 0) return null;
-    const r = rows[0];
-    return {
-      id: r.id,
-      orderId: r.order_id,
-      merchantTransId: r.merchant_trans_id,
-      customerName: r.customer_name,
-      title: r.title,
-      targetLiter: Number(r.target_liter),
-      dispensedLiter: Number(r.dispensed_liter),
-      amount: Number(r.amount),
-      status: r.status,
-      acquirementId: r.acquirement_id,
-      createdAt: r.created_at,
-      paidAt: r.paid_at
-    };
+    try {
+      const [rows] = await pool.query('SELECT * FROM transactions WHERE order_id=? OR merchant_trans_id=? LIMIT 1', [orderId, orderId]);
+      if (rows.length > 0) {
+        const r = rows[0];
+        return {
+          id: r.id,
+          orderId: r.order_id,
+          merchantTransId: r.merchant_trans_id,
+          customerName: r.customer_name,
+          title: r.title,
+          targetLiter: Number(r.target_liter),
+          dispensedLiter: Number(r.dispensed_liter),
+          amount: Number(r.amount),
+          status: r.status,
+          acquirementId: r.acquirement_id,
+          createdAt: r.created_at,
+          paidAt: r.paid_at
+        };
+      }
+    } catch (e) {
+      console.error('MySQL findTransaction error:', e.message);
+    }
   }
   return memTransactions.find(t => t.orderId === orderId || t.merchantTransId === orderId);
 }
 
 async function saveTransaction(tx) {
   if (isMySqlConnected) {
-    await pool.query(`
-      INSERT INTO transactions 
-      (order_id, merchant_trans_id, customer_name, title, target_liter, dispensed_liter, amount, currency, status, qr_string, checkout_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      tx.orderId,
-      tx.merchantTransId || tx.orderId,
-      tx.customerName || 'Pelanggan Depot',
-      tx.title,
-      tx.targetLiter,
-      tx.dispensedLiter || 0,
-      tx.amount,
-      tx.currency || 'IDR',
-      tx.status || 'PENDING',
-      tx.qrString || '',
-      tx.checkoutUrl || ''
-    ]);
-    return tx;
+    try {
+      await pool.query(`
+        INSERT INTO transactions 
+        (order_id, merchant_trans_id, customer_name, title, target_liter, dispensed_liter, amount, currency, status, qr_string, checkout_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        tx.orderId,
+        tx.merchantTransId || tx.orderId,
+        tx.customerName || 'Pelanggan Depot',
+        tx.title,
+        tx.targetLiter,
+        tx.dispensedLiter || 0,
+        tx.amount,
+        tx.currency || 'IDR',
+        tx.status || 'PENDING',
+        tx.qrString || '',
+        tx.checkoutUrl || ''
+      ]);
+      return tx;
+    } catch (e) {
+      console.error('MySQL saveTransaction error:', e.message);
+    }
   }
   memTransactions.unshift(tx);
-  fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(memTransactions.slice(0, 200), null, 2));
+  try { fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(memTransactions.slice(0, 200), null, 2)); } catch (e) {}
   return tx;
 }
 
 async function updateTransaction(orderId, updateFields) {
   if (isMySqlConnected) {
-    const fields = [];
-    const values = [];
+    try {
+      const fields = [];
+      const values = [];
 
-    if (updateFields.status) { fields.push('status=?'); values.push(updateFields.status); }
-    if (updateFields.paidAt) { fields.push('paid_at=?'); values.push(new Date(updateFields.paidAt)); }
-    if (updateFields.completedAt) { fields.push('completed_at=?'); values.push(new Date(updateFields.completedAt)); }
-    if (updateFields.dispensedLiter !== undefined) { fields.push('dispensed_liter=?'); values.push(updateFields.dispensedLiter); }
-    if (updateFields.durationSeconds !== undefined) { fields.push('duration_seconds=?'); values.push(updateFields.durationSeconds); }
-    if (updateFields.acquirementId) { fields.push('acquirement_id=?'); values.push(updateFields.acquirementId); }
+      if (updateFields.status) { fields.push('status=?'); values.push(updateFields.status); }
+      if (updateFields.paidAt) { fields.push('paid_at=?'); values.push(new Date(updateFields.paidAt)); }
+      if (updateFields.completedAt) { fields.push('completed_at=?'); values.push(new Date(updateFields.completedAt)); }
+      if (updateFields.dispensedLiter !== undefined) { fields.push('dispensed_liter=?'); values.push(updateFields.dispensedLiter); }
+      if (updateFields.durationSeconds !== undefined) { fields.push('duration_seconds=?'); values.push(updateFields.durationSeconds); }
+      if (updateFields.acquirementId) { fields.push('acquirement_id=?'); values.push(updateFields.acquirementId); }
 
-    if (fields.length > 0) {
-      values.push(orderId, orderId);
-      await pool.query(`UPDATE transactions SET ${fields.join(', ')} WHERE order_id=? OR merchant_trans_id=?`, values);
+      if (fields.length > 0) {
+        values.push(orderId, orderId);
+        await pool.query(`UPDATE transactions SET ${fields.join(', ')} WHERE order_id=? OR merchant_trans_id=?`, values);
+      }
+      return;
+    } catch (e) {
+      console.error('MySQL updateTransaction error:', e.message);
     }
-    return;
   }
 
   const tx = memTransactions.find(t => t.orderId === orderId || t.merchantTransId === orderId);
   if (tx) {
     Object.assign(tx, updateFields);
-    fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(memTransactions.slice(0, 200), null, 2));
+    try { fs.writeFileSync(TRANSACTIONS_FILE, JSON.stringify(memTransactions.slice(0, 200), null, 2)); } catch (e) {}
   }
 }
 
@@ -334,11 +362,15 @@ async function updateTransaction(orderId, updateFields) {
 // =====================================
 async function getSetting(key, defaultVal = null) {
   if (isMySqlConnected) {
-    const [rows] = await pool.query('SELECT setting_value FROM system_settings WHERE setting_key=?', [key]);
-    if (rows.length > 0) {
-      try { return JSON.parse(rows[0].setting_value); } catch (e) { return rows[0].setting_value; }
+    try {
+      const [rows] = await pool.query('SELECT setting_value FROM system_settings WHERE setting_key=?', [key]);
+      if (rows.length > 0) {
+        try { return JSON.parse(rows[0].setting_value); } catch (e) { return rows[0].setting_value; }
+      }
+      return defaultVal;
+    } catch (e) {
+      console.error('MySQL getSetting error:', e.message);
     }
-    return defaultVal;
   }
   return memSettings[key] !== undefined ? memSettings[key] : defaultVal;
 }
@@ -346,11 +378,15 @@ async function getSetting(key, defaultVal = null) {
 async function setSetting(key, val) {
   const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
   if (isMySqlConnected) {
-    await pool.query('INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value=?', [key, strVal, strVal]);
-  } else {
-    memSettings[key] = val;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(memSettings, null, 2));
+    try {
+      await pool.query('INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value=?', [key, strVal, strVal]);
+      return;
+    } catch (e) {
+      console.error('MySQL setSetting error:', e.message);
+    }
   }
+  memSettings[key] = val;
+  try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(memSettings, null, 2)); } catch (e) {}
 }
 
 // =====================================
@@ -380,45 +416,53 @@ async function addLog(source, type, message, payload = null) {
 
   memLogs.unshift(logItem);
   if (memLogs.length > 250) memLogs.pop();
-  fs.writeFileSync(LOGS_FILE, JSON.stringify(memLogs, null, 2));
+  try { fs.writeFileSync(LOGS_FILE, JSON.stringify(memLogs, null, 2)); } catch (e) {}
 
   return logItem;
 }
 
 async function getLogs(limit = 100) {
   if (isMySqlConnected) {
-    const [rows] = await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?', [limit]);
-    return rows.map(r => ({
-      id: r.log_id,
-      timestamp: r.created_at,
-      source: r.source,
-      type: r.type,
-      message: r.message,
-      payload: r.payload ? (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload) : null
-    }));
+    try {
+      const [rows] = await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?', [limit]);
+      return rows.map(r => ({
+        id: r.log_id,
+        timestamp: r.created_at,
+        source: r.source,
+        type: r.type,
+        message: r.message,
+        payload: r.payload ? (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload) : null
+      }));
+    } catch (e) {
+      console.error('MySQL getLogs error:', e.message);
+    }
   }
   return memLogs.slice(0, limit);
 }
 
 // Stats Calculation
 async function getTodayStats() {
-  const todayStr = new Date().toISOString().slice(0, 10);
   if (isMySqlConnected) {
-    const [rows] = await pool.query(`
-      SELECT 
-        COALESCE(SUM(amount), 0) as totalRevenue,
-        COALESCE(SUM(CASE WHEN dispensed_liter > 0 THEN dispensed_liter ELSE target_liter END), 0) as totalLiters,
-        COUNT(*) as totalOrders
-      FROM transactions 
-      WHERE DATE(created_at) = CURDATE() AND status = 'COMPLETED'
-    `);
-    return {
-      totalRevenueToday: Number(rows[0].totalRevenue || 0),
-      totalWaterDispensedToday: Number(rows[0].totalLiters || 0),
-      totalOrdersToday: Number(rows[0].totalOrders || 0)
-    };
+    try {
+      const [rows] = await pool.query(`
+        SELECT 
+          COALESCE(SUM(amount), 0) as totalRevenue,
+          COALESCE(SUM(CASE WHEN dispensed_liter > 0 THEN dispensed_liter ELSE target_liter END), 0) as totalLiters,
+          COUNT(*) as totalOrders
+        FROM transactions 
+        WHERE DATE(created_at) = CURDATE() AND status = 'COMPLETED'
+      `);
+      return {
+        totalRevenueToday: Number(rows[0].totalRevenue || 0),
+        totalWaterDispensedToday: Number(rows[0].totalLiters || 0),
+        totalOrdersToday: Number(rows[0].totalOrders || 0)
+      };
+    } catch (e) {
+      console.error('MySQL getTodayStats error:', e.message);
+    }
   }
 
+  const todayStr = new Date().toISOString().slice(0, 10);
   const todayTx = memTransactions.filter(t => t.createdAt && t.createdAt.startsWith(todayStr) && t.status === 'COMPLETED');
   return {
     totalRevenueToday: todayTx.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0),
