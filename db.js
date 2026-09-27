@@ -11,12 +11,38 @@ const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
 const PACKAGES_FILE = path.join(DATA_DIR, 'packages.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const MACHINES_FILE = path.join(DATA_DIR, 'machines.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 // Default initial data
 const DEFAULT_PACKAGES = [
   { id: 1, name: '1 Galon (19L)', liters: 19, price: 7000, badge: 'Populer', isActive: 1 },
   { id: 2, name: '2 Galon (38L)', liters: 38, price: 14000, badge: 'Hemat', isActive: 1 },
   { id: 3, name: 'Galon Mini (10L)', liters: 10, price: 4000, badge: 'Praktis', isActive: 1 }
+];
+
+const DEFAULT_USERS = [
+  {
+    id: 1,
+    username: 'admin',
+    password: 'admin123',
+    name: 'Administrator Pusat',
+    role: 'ADMIN',
+    assignedMachineId: null,
+    phone: '08123456789',
+    isActive: 1,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 2,
+    username: 'mitra1',
+    password: '123456',
+    name: 'Mitra Cabang 1',
+    role: 'CLIENT',
+    assignedMachineId: 'DEPOT-001',
+    phone: '08987654321',
+    isActive: 1,
+    createdAt: new Date().toISOString()
+  }
 ];
 
 const DEFAULT_MACHINES = [
@@ -45,6 +71,7 @@ let memPackages = [...DEFAULT_PACKAGES];
 let memTransactions = [];
 let memLogs = [];
 let memMachines = [...DEFAULT_MACHINES];
+let memUsers = [...DEFAULT_USERS];
 let memSettings = {
   wifi_ssid: 'WiFi_Depot_Air',
   wifi_password: '',
@@ -58,6 +85,7 @@ try {
   if (fs.existsSync(LOGS_FILE)) memLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
   if (fs.existsSync(SETTINGS_FILE)) memSettings = { ...memSettings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
   if (fs.existsSync(MACHINES_FILE)) memMachines = JSON.parse(fs.readFileSync(MACHINES_FILE, 'utf8'));
+  if (fs.existsSync(USERS_FILE)) memUsers = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
 } catch (e) {}
 
 async function initDB() {
@@ -167,6 +195,34 @@ async function initDB() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          username VARCHAR(50) NOT NULL UNIQUE,
+          password VARCHAR(255) NOT NULL,
+          name VARCHAR(100) NOT NULL,
+          role VARCHAR(20) DEFAULT 'CLIENT',
+          assigned_machine_id VARCHAR(50) DEFAULT NULL,
+          phone VARCHAR(50) DEFAULT '',
+          is_active TINYINT(1) DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+
+      // Seed user awal jika masih kosong
+      const [uRows] = await pool.query('SELECT COUNT(*) as count FROM users');
+      if (uRows[0].count === 0) {
+        await pool.query(
+          'INSERT INTO users (username, password, name, role, assigned_machine_id, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)',
+          [
+            'admin', 'admin123', 'Administrator Pusat', 'ADMIN', null, '08123456789', 1,
+            'mitra1', '123456', 'Mitra Cabang 1', 'CLIENT', 'DEPOT-001', '08987654321', 1
+          ]
+        );
+        console.log('🌱 Seed default users: admin (Superadmin) dan mitra1 (Client Cabang 1)');
+      }
 
       // Seed mesin awal jika masih kosong
       const [machRows] = await pool.query('SELECT COUNT(*) as count FROM depot_machines');
@@ -513,18 +569,24 @@ async function getLogs(limit = 100) {
   return memLogs.slice(0, limit);
 }
 
-// Stats Calculation
-async function getTodayStats() {
+// Stats Calculation (Bisa per Device ID untuk Client, atau Global untuk Admin)
+async function getTodayStats(deviceId = null) {
   if (isMySqlConnected) {
     try {
-      const [rows] = await pool.query(`
+      let query = `
         SELECT 
           COALESCE(SUM(amount), 0) as totalRevenue,
           COALESCE(SUM(CASE WHEN dispensed_liter > 0 THEN dispensed_liter ELSE target_liter END), 0) as totalLiters,
           COUNT(*) as totalOrders
         FROM transactions 
         WHERE DATE(created_at) = CURDATE() AND status = 'COMPLETED'
-      `);
+      `;
+      const params = [];
+      if (deviceId) {
+        query += ' AND device_id = ?';
+        params.push(deviceId);
+      }
+      const [rows] = await pool.query(query, params);
       return {
         totalRevenueToday: Number(rows[0].totalRevenue || 0),
         totalWaterDispensedToday: Number(rows[0].totalLiters || 0),
@@ -536,7 +598,10 @@ async function getTodayStats() {
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayTx = memTransactions.filter(t => t.createdAt && t.createdAt.startsWith(todayStr) && t.status === 'COMPLETED');
+  let todayTx = memTransactions.filter(t => t.createdAt && t.createdAt.startsWith(todayStr) && t.status === 'COMPLETED');
+  if (deviceId) {
+    todayTx = todayTx.filter(t => (t.deviceId || 'DEPOT-001') === deviceId);
+  }
   return {
     totalRevenueToday: todayTx.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0),
     totalWaterDispensedToday: todayTx.reduce((acc, curr) => acc + (Number(curr.dispensedLiter) || Number(curr.targetLiter) || 0), 0),
@@ -547,10 +612,17 @@ async function getTodayStats() {
 // =====================================
 // DEPOT MACHINES (MULTI-CABANG FLEET)
 // =====================================
-async function getMachines() {
+async function getMachines(filterDeviceId = null) {
   if (isMySqlConnected) {
     try {
-      const [rows] = await pool.query('SELECT * FROM depot_machines ORDER BY id ASC');
+      let query = 'SELECT * FROM depot_machines';
+      const params = [];
+      if (filterDeviceId) {
+        query += ' WHERE id = ?';
+        params.push(filterDeviceId);
+      }
+      query += ' ORDER BY id ASC';
+      const [rows] = await pool.query(query, params);
       return rows.map(r => ({
         id: r.id,
         name: r.name,
@@ -569,6 +641,9 @@ async function getMachines() {
     } catch (e) {
       console.error('MySQL getMachines error:', e.message);
     }
+  }
+  if (filterDeviceId) {
+    return memMachines.filter(m => m.id === filterDeviceId);
   }
   return memMachines;
 }
@@ -734,6 +809,153 @@ async function resetMachineFilter(id) {
   return true;
 }
 
+// =====================================
+// USERS & MULTI-TENANT RBAC DAO
+// =====================================
+async function getUsers() {
+  if (isMySqlConnected) {
+    try {
+      const [rows] = await pool.query('SELECT id, username, name, role, assigned_machine_id, phone, is_active, created_at FROM users ORDER BY id ASC');
+      return rows.map(r => ({
+        id: r.id,
+        username: r.username,
+        name: r.name,
+        role: r.role,
+        assignedMachineId: r.assigned_machine_id,
+        phone: r.phone,
+        isActive: r.is_active === 1,
+        createdAt: r.created_at
+      }));
+    } catch (e) {
+      console.error('MySQL getUsers error:', e.message);
+    }
+  }
+  return memUsers.map(u => ({
+    id: u.id,
+    username: u.username,
+    name: u.name,
+    role: u.role,
+    assignedMachineId: u.assignedMachineId,
+    phone: u.phone,
+    isActive: u.isActive === 1,
+    createdAt: u.createdAt
+  }));
+}
+
+async function getUserByUsername(username) {
+  if (isMySqlConnected) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM users WHERE username = ? LIMIT 1', [username]);
+      if (rows.length > 0) {
+        const r = rows[0];
+        return {
+          id: r.id,
+          username: r.username,
+          password: r.password,
+          name: r.name,
+          role: r.role,
+          assignedMachineId: r.assigned_machine_id,
+          phone: r.phone,
+          isActive: r.is_active === 1,
+          createdAt: r.created_at
+        };
+      }
+    } catch (e) {
+      console.error('MySQL getUserByUsername error:', e.message);
+    }
+  }
+  return memUsers.find(u => u.username.toLowerCase() === username.toLowerCase()) || null;
+}
+
+async function validateUser(username, password) {
+  const user = await getUserByUsername(username);
+  if (!user) return null;
+  if (user.password === password) {
+    const { password: _, ...safeUser } = user;
+    return safeUser;
+  }
+  return null;
+}
+
+async function saveUser(userData) {
+  const { id, username, password, name, role, assignedMachineId, phone } = userData;
+  const cleanRole = role === 'ADMIN' ? 'ADMIN' : 'CLIENT';
+  const cleanMachine = cleanRole === 'ADMIN' ? null : (assignedMachineId || null);
+
+  if (isMySqlConnected) {
+    try {
+      if (id) {
+        if (password) {
+          await pool.query(
+            'UPDATE users SET username=?, password=?, name=?, role=?, assigned_machine_id=?, phone=? WHERE id=?',
+            [username, password, name, cleanRole, cleanMachine, phone || '', id]
+          );
+        } else {
+          await pool.query(
+            'UPDATE users SET username=?, name=?, role=?, assigned_machine_id=?, phone=? WHERE id=?',
+            [username, name, cleanRole, cleanMachine, phone || '', id]
+          );
+        }
+        return { id: Number(id), username, name, role: cleanRole, assignedMachineId: cleanMachine, phone };
+      } else {
+        const [res] = await pool.query(
+          'INSERT INTO users (username, password, name, role, assigned_machine_id, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)',
+          [username, password, name, cleanRole, cleanMachine, phone || '']
+        );
+        return { id: res.insertId, username, name, role: cleanRole, assignedMachineId: cleanMachine, phone };
+      }
+    } catch (e) {
+      console.error('MySQL saveUser error:', e.message);
+      throw e;
+    }
+  }
+
+  if (id) {
+    const idx = memUsers.findIndex(u => u.id === Number(id));
+    if (idx !== -1) {
+      memUsers[idx] = { 
+        ...memUsers[idx], 
+        username, 
+        name, 
+        role: cleanRole, 
+        assignedMachineId: cleanMachine, 
+        phone: phone || '',
+        ...(password ? { password } : {})
+      };
+    }
+  } else {
+    const newId = (memUsers.reduce((max, u) => Math.max(max, u.id || 0), 0)) + 1;
+    memUsers.push({
+      id: newId,
+      username,
+      password: password || '123456',
+      name,
+      role: cleanRole,
+      assignedMachineId: cleanMachine,
+      phone: phone || '',
+      isActive: 1,
+      createdAt: new Date().toISOString()
+    });
+  }
+  try { fs.writeFileSync(USERS_FILE, JSON.stringify(memUsers, null, 2)); } catch (e) {}
+  return userData;
+}
+
+async function deleteUser(id) {
+  if (id === 1) throw new Error('User Super Admin utama tidak boleh dihapus!');
+  if (isMySqlConnected) {
+    try {
+      await pool.query('DELETE FROM users WHERE id=?', [id]);
+      return true;
+    } catch (e) {
+      console.error('MySQL deleteUser error:', e.message);
+    }
+  }
+  memUsers = memUsers.filter(u => u.id !== Number(id));
+  try { fs.writeFileSync(USERS_FILE, JSON.stringify(memUsers, null, 2)); } catch (e) {}
+  return true;
+}
+
 module.exports = {
   initDB,
   isMySqlConnected: () => isMySqlConnected,
@@ -756,5 +978,10 @@ module.exports = {
   deleteMachine,
   updateMachineStatus,
   incrementMachineUsage,
-  resetMachineFilter
+  resetMachineFilter,
+  getUsers,
+  getUserByUsername,
+  validateUser,
+  saveUser,
+  deleteUser
 };

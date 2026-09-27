@@ -21,11 +21,53 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3005;
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
+const crypto = require('crypto');
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+
+// ==========================================
+// SESSION & AUTHENTICATION MIDDLEWARE
+// ==========================================
+const userSessions = new Map(); // token -> { user, expiresAt }
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'] || req.headers['x-auth-token'];
+  const token = authHeader ? (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim()) : null;
+  
+  if (token && userSessions.has(token)) {
+    const session = userSessions.get(token);
+    if (session.expiresAt > Date.now()) {
+      req.user = session.user;
+      req.token = token;
+    } else {
+      userSessions.delete(token);
+      req.user = null;
+    }
+  } else {
+    req.user = null;
+  }
+  next();
+}
+
+function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Silakan login terlebih dahulu' });
+  }
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ success: false, message: 'Akses ditolak: Hanya Super Admin yang berhak' });
+  }
+  next();
+}
+
+app.use(authenticateToken);
 
 // ==========================================
 // MULTI-MACHINE (FLEET) IN-MEMORY STATE
@@ -575,7 +617,14 @@ app.post('/api/esp32/telemetry', (req, res) => {
 
 app.get('/api/machines', async (req, res) => {
   try {
-    const dbMachines = await db.getMachines();
+    let filterId = null;
+    if (req.user && req.user.role === 'CLIENT') {
+      filterId = req.user.assignedMachineId || 'DEPOT-001';
+    } else if (req.query.deviceId) {
+      filterId = req.query.deviceId;
+    }
+
+    const dbMachines = await db.getMachines(filterId);
     const result = dbMachines.map(m => {
       const live = getOrCreateMachineState(m.id);
       return {
@@ -596,7 +645,7 @@ app.get('/api/machines', async (req, res) => {
   }
 });
 
-app.post('/api/machines', async (req, res) => {
+app.post('/api/machines', requireAdmin, async (req, res) => {
   try {
     const { id, name, location, filterLimitLiters } = req.body;
     if (!id || !name) {
@@ -621,7 +670,7 @@ app.post('/api/machines', async (req, res) => {
   }
 });
 
-app.delete('/api/machines/:id', async (req, res) => {
+app.delete('/api/machines/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     await db.deleteMachine(id);
@@ -632,6 +681,102 @@ app.delete('/api/machines/:id', async (req, res) => {
     io.emit('machines:updated');
 
     return res.json({ success: true, message: `Mesin ${id} berhasil dihapus` });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ==========================================
+// AUTHENTICATION & MULTI-TENANT RBAC API
+// ==========================================
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username dan password wajib diisi!' });
+    }
+    const user = await db.validateUser(username, password);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Username atau password salah!' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    userSessions.set(token, {
+      user,
+      expiresAt: Date.now() + 7 * 24 * 3600 * 1000
+    });
+
+    const logItem = await db.addLog('AUTH', 'SUCCESS', `User [${user.username}] login sukses (Role: ${user.role}${user.assignedMachineId ? ' - ' + user.assignedMachineId : ''})`);
+    io.emit('log:new', logItem);
+
+    return res.json({
+      success: true,
+      token,
+      user
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Belum login' });
+  }
+  return res.json({ success: true, user: req.user });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  if (req.token) {
+    userSessions.delete(req.token);
+  }
+  return res.json({ success: true, message: 'Logout berhasil' });
+});
+
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const users = await db.getUsers();
+    return res.json({ success: true, data: users });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const { id, username, password, name, role, assignedMachineId, phone } = req.body;
+    if (!username || !name) {
+      return res.status(400).json({ success: false, message: 'Username dan Nama wajib diisi!' });
+    }
+    const saved = await db.saveUser({
+      id: id ? Number(id) : undefined,
+      username: username.toLowerCase().trim(),
+      password,
+      name,
+      role: role || 'CLIENT',
+      assignedMachineId: assignedMachineId || null,
+      phone: phone || ''
+    });
+
+    const logItem = await db.addLog('ADMIN', 'SUCCESS', `Akun Pengguna Disimpan: ${saved.username} (Role: ${saved.role})`);
+    io.emit('log:new', logItem);
+
+    return res.json({ success: true, data: saved });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.deleteUser(Number(id));
+
+    const logItem = await db.addLog('ADMIN', 'WARNING', `Pengguna ID #${id} dihapus oleh Admin`);
+    io.emit('log:new', logItem);
+
+    return res.json({ success: true, message: 'Pengguna berhasil dihapus' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -744,32 +889,22 @@ app.delete('/api/admin/packages/:id', async (req, res) => {
 // 4. STATS & MONITORING API
 // ==========================================
 
-app.post('/api/depot/emergency-stop', async (req, res) => {
-  const previousOrder = currentState.activeOrder;
-  currentState.status = 'IDLE';
-  currentState.activeOrder = null;
-
-  if (previousOrder) {
-    await db.updateTransaction(previousOrder.orderId, {
-      status: 'STOPPED',
-      completedAt: new Date().toISOString()
-    });
-  }
-
-  const logItem = await db.addLog('DASHBOARD', 'WARNING', 'Emergency Stop diaktifkan manual dari Dashboard!');
-  io.emit('log:new', logItem);
-  io.emit('system:state', currentState);
-
-  return res.json({ success: true, message: 'Emergency Stop dieksekusi' });
-});
-
 app.get('/api/status', async (req, res) => {
-  await refreshStats();
+  let targetDeviceId = req.query.deviceId || null;
+  if (req.user && req.user.role === 'CLIENT') {
+    targetDeviceId = req.user.assignedMachineId || 'DEPOT-001';
+  }
+  const stats = await db.getTodayStats(targetDeviceId);
+  const targetMachine = getOrCreateMachineState(targetDeviceId || 'DEPOT-001');
   const configuredSsid = await db.getSetting('wifi_ssid', 'WiFi_Depot_Air');
+
   return res.json({
     success: true,
     data: {
-      ...currentState,
+      ...targetMachine,
+      totalRevenueToday: stats.totalRevenueToday,
+      totalWaterDispensedToday: stats.totalWaterDispensedToday,
+      totalOrdersToday: stats.totalOrdersToday,
       serverTime: new Date().toISOString(),
       publicBaseUrl: PUBLIC_BASE_URL,
       webhookEndpoint: `${PUBLIC_BASE_URL}/api/dana/finish-notify`,
@@ -782,11 +917,18 @@ app.get('/api/status', async (req, res) => {
 });
 
 app.get('/api/transactions', async (req, res) => {
-  const tx = await db.getTransactions(100);
+  let targetDeviceId = req.query.deviceId || null;
+  if (req.user && req.user.role === 'CLIENT') {
+    targetDeviceId = req.user.assignedMachineId || 'DEPOT-001';
+  }
+  const tx = await db.getTransactions(100, targetDeviceId);
   return res.json({ success: true, total: tx.length, data: tx });
 });
 
 app.get('/api/logs', async (req, res) => {
+  if (req.user && req.user.role === 'CLIENT') {
+    return res.json({ success: true, total: 0, data: [] });
+  }
   const logs = await db.getLogs(100);
   return res.json({ success: true, total: logs.length, data: logs });
 });

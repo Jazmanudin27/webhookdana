@@ -28,8 +28,8 @@ WiFiClientSecure secureClient;
 // ==========================================================
 // 1. DEFAULT KONFIGURASI WIFI, ID MESIN & SERVER CLOUD
 // ==========================================================
-// ID Unik Mesin Depot (Ganti per cabang/lokasi: DEPOT-001, DEPOT-002, DEPOT-003, dst.)
-const String DEVICE_ID = "DEPOT-001";
+// ID Unik Mesin Depot (Bisa diubah lewat Hotspot HP di lapangan atau default di sini)
+String DEVICE_ID = "DEPOT-001";
 
 String wifi_ssid     = "Ade";          // SSID WiFi Router
 String wifi_password = "19052026";     // Password WiFi Router
@@ -129,20 +129,14 @@ void updateLeds() {
 }
 
 // ==========================================================
-// 4. MEMUAT & MENYIMPAN WIFI DARI FLASH NVS
+// 4. MEMUAT & MENYIMPAN KONFIGURASI (WIFI & DEVICE ID) DARI NVS
 // ==========================================================
-void loadStoredWiFi() {
+void loadStoredConfig() {
     preferences.begin("depot_wifi", false);
     String storedSSID = preferences.getString("ssid", "");
     String storedPASS = preferences.getString("pass", "");
+    String storedDev  = preferences.getString("dev_id", "");
     preferences.end();
-
-    // Migrasi otomatis jika masih tersimpan konfigurasi lama
-    if (storedSSID == "Jazz" || storedSSID == "Ade") {
-        saveWiFiToNVS("Ade", "19052026");
-        storedSSID = "Ade";
-        storedPASS = "19052026";
-    }
 
     if (storedSSID.length() > 0 && storedPASS.length() > 0) {
         wifi_ssid = storedSSID;
@@ -150,21 +144,39 @@ void loadStoredWiFi() {
         Serial.print("📂 Membaca WiFi dari memori NVS ESP32: ");
         Serial.println(wifi_ssid);
     } else {
-        Serial.println("ℹ️ Memakai konfigurasi default: " + wifi_ssid);
+        Serial.println("ℹ️ Memakai konfigurasi default WiFi: " + wifi_ssid);
+    }
+
+    if (storedDev.length() > 0) {
+        DEVICE_ID = storedDev;
+        Serial.println("🏭 [NVS] Membaca Device ID dari Flash: " + DEVICE_ID);
+    } else {
+        Serial.println("ℹ️ Memakai Device ID default: " + DEVICE_ID);
     }
 }
 
-void saveWiFiToNVS(String newSsid, String newPass) {
+void saveConfigToNVS(String newSsid, String newPass, String newDevId = "") {
     preferences.begin("depot_wifi", false);
     preferences.putString("ssid", newSsid);
     preferences.putString("pass", newPass);
+    if (newDevId.length() > 0) {
+        newDevId.trim();
+        newDevId.toUpperCase();
+        preferences.putString("dev_id", newDevId);
+        DEVICE_ID = newDevId;
+    }
     preferences.end();
     
     wifi_ssid = newSsid;
     wifi_password = newPass;
 
-    Serial.println("\n💾 [NVS] WiFi baru berhasil disimpan permanen ke memori Flash ESP32!");
+    Serial.println("\n💾 [NVS] Konfigurasi berhasil disimpan permanen ke memori Flash ESP32!");
     Serial.print("SSID Baru: "); Serial.println(newSsid);
+    Serial.print("Device ID: "); Serial.println(DEVICE_ID);
+}
+
+void saveWiFiToNVS(String newSsid, String newPass) {
+    saveConfigToNVS(newSsid, newPass, "");
 }
 
 // ==========================================================
@@ -227,15 +239,22 @@ void startEmergencyAP() {
     Serial.print("Buka browser di HP ke: http://"); Serial.println(WiFi.softAPIP());
 
     apServer.on("/", []() {
-        String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>Pengaturan WiFi Depot Air</title>"
+        String html = "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>Pengaturan Depot Air</title>"
                       "<style>body{font-family:sans-serif;background:#0f172a;color:#fff;padding:20px;text-align:center;}"
-                      ".card{background:#1e293b;padding:24px;border-radius:16px;max-width:350px;margin:auto;}"
-                      "input{width:100%;padding:10px;margin:10px 0;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;box-sizing:border-box;}"
-                      "button{background:#0284c7;color:#fff;border:none;padding:12px;width:100%;border-radius:8px;font-weight:bold;cursor:pointer;}</style></head>"
-                      "<body><div class='card'><h2>Pengaturan WiFi ESP32</h2><p style='font-size:13px;color:#94a3b8;'>Masukkan WiFi Rumah / Hotspot HP:</p>"
+                      ".card{background:#1e293b;padding:24px;border-radius:16px;max-width:350px;margin:auto;text-align:left;}"
+                      "h2{text-align:center;color:#38bdf8;margin-bottom:4px;}"
+                      "p.sub{font-size:12px;color:#94a3b8;text-align:center;margin-bottom:20px;}"
+                      "label{font-size:11px;color:#cbd5e1;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-top:10px;}"
+                      "input{width:100%;padding:10px;margin:6px 0 10px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#fff;box-sizing:border-box;font-size:14px;}"
+                      "button{background:#0284c7;color:#fff;border:none;padding:12px;width:100%;border-radius:8px;font-weight:bold;cursor:pointer;margin-top:14px;font-size:15px;}</style></head>"
+                      "<body><div class='card'><h2>Setup Depot Air</h2><p class='sub'>Konfigurasi WiFi & Device ID Cabang</p>"
                       "<form action='/save' method='POST'>"
-                      "<input type='text' name='ssid' placeholder='Nama WiFi (SSID)' required>"
+                      "<label>Nama WiFi (SSID):</label>"
+                      "<input type='text' name='ssid' value='" + wifi_ssid + "' required>"
+                      "<label>Password WiFi:</label>"
                       "<input type='password' name='pass' placeholder='Password WiFi'>"
+                      "<label>Device ID Cabang (Unik):</label>"
+                      "<input type='text' name='device_id' value='" + DEVICE_ID + "' required style='color:#38bdf8;font-weight:bold;text-transform:uppercase;'>"
                       "<button type='submit'>Simpan & Sambungkan</button></form></div></body></html>";
         apServer.send(200, "text/html", html);
     });
@@ -244,10 +263,16 @@ void startEmergencyAP() {
         if (apServer.hasArg("ssid")) {
             String s = apServer.arg("ssid");
             String p = apServer.hasArg("pass") ? apServer.arg("pass") : "";
-            saveWiFiToNVS(s, p);
+            String d = apServer.hasArg("device_id") ? apServer.arg("device_id") : DEVICE_ID;
+            d.trim();
+            d.toUpperCase();
+            saveConfigToNVS(s, p, d);
 
             String resp = "<html><body style='background:#0f172a;color:#fff;text-align:center;padding:40px;font-family:sans-serif;'>"
-                          "<h2>✅ Tersimpan!</h2><p>ESP32 sedang me-restart untuk konek ke " + s + "...</p></body></html>";
+                          "<h2 style='color:#38bdf8;'>✅ Konfigurasi Tersimpan!</h2>"
+                          "<p>Device ID: <strong>" + d + "</strong></p>"
+                          "<p>WiFi: <strong>" + s + "</strong></p>"
+                          "<p style='color:#94a3b8;'>ESP32 sedang me-restart untuk konek ke server...</p></body></html>";
             apServer.send(200, "text/html", resp);
             
             shouldRestart = true;
@@ -529,7 +554,7 @@ void setup() {
 
     secureClient.setInsecure();
 
-    loadStoredWiFi();
+    loadStoredConfig();
 
     if (!connectToWiFi(15)) {
         startEmergencyAP();

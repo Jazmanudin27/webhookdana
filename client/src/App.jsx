@@ -17,7 +17,11 @@ import {
   Sparkles,
   Database,
   CheckCircle2,
-  MapPin
+  MapPin,
+  Lock,
+  LogOut,
+  User,
+  ShieldAlert
 } from 'lucide-react';
 
 import WaterDispenserVisualizer from './components/WaterDispenserVisualizer';
@@ -28,6 +32,7 @@ import HardwareConfigGuide from './components/HardwareConfigGuide';
 import WifiSettingsCard from './components/WifiSettingsCard';
 import PackageManagerCard from './components/PackageManagerCard';
 import FleetManagementCard from './components/FleetManagementCard';
+import LoginModal from './components/LoginModal';
 
 export default function App() {
   const [socket, setSocket] = useState(null);
@@ -36,6 +41,11 @@ export default function App() {
   // URL Param for machine locking on kiosk tablets
   const urlParams = new URLSearchParams(window.location.search);
   const initialMachine = (urlParams.get('machine') || 'DEPOT-001').toUpperCase();
+
+  // Authentication & RBAC State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(localStorage.getItem('depot_auth_token'));
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   // Fleet & Multi-Machine State
   const [machines, setMachines] = useState([]);
@@ -68,10 +78,40 @@ export default function App() {
 
   const selectedMachine = machines.find(m => m.id === selectedMachineId) || null;
 
-  // Fetch Machines List
+  // Verify Session Token on Load
+  useEffect(() => {
+    const token = localStorage.getItem('depot_auth_token');
+    if (token) {
+      fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.user) {
+            setCurrentUser(data.user);
+            setAuthToken(token);
+            if (data.user.role === 'CLIENT' && data.user.assignedMachineId) {
+              setSelectedMachineId(data.user.assignedMachineId);
+            }
+          } else {
+            localStorage.removeItem('depot_auth_token');
+            setAuthToken(null);
+            setCurrentUser(null);
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem('depot_auth_token');
+          setAuthToken(null);
+          setCurrentUser(null);
+        });
+    }
+  }, []);
+
+  // Fetch Machines List (Filtered automatically on backend if logged in as client)
   const fetchMachines = async () => {
     try {
-      const res = await fetch('/api/machines');
+      const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+      const res = await fetch('/api/machines', { headers });
       const data = await res.json();
       if (data.success && data.data) {
         setMachines(data.data);
@@ -93,7 +133,19 @@ export default function App() {
     }
   };
 
-  // Switch selected machine and update URL parameter smoothly
+  // Fetch Transactions (Filtered automatically on backend for client)
+  const fetchTransactions = async () => {
+    try {
+      const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+      const res = await fetch(`/api/transactions?deviceId=${selectedMachineId}`, { headers });
+      const data = await res.json();
+      if (data.success) setTransactions(data.data || []);
+    } catch (err) {
+      console.error('Failed to fetch transactions:', err);
+    }
+  };
+
+  // Switch selected machine and update URL parameter
   const handleSelectMachine = (newId) => {
     setSelectedMachineId(newId);
     const newUrl = new URL(window.location);
@@ -114,9 +166,38 @@ export default function App() {
     }
   };
 
+  // Handle Login Success
+  const handleLoginSuccess = (user, token) => {
+    setCurrentUser(user);
+    setAuthToken(token);
+    if (user.role === 'CLIENT' && user.assignedMachineId) {
+      setSelectedMachineId(user.assignedMachineId);
+    }
+    fetchMachines();
+    fetchTransactions();
+  };
+
+  // Handle Logout
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      });
+    } catch (e) {}
+    localStorage.removeItem('depot_auth_token');
+    setAuthToken(null);
+    setCurrentUser(null);
+    setActiveTab('dashboard');
+    fetchMachines();
+    fetchTransactions();
+  };
+
   // Initialize Socket.io and initial HTTP data fetch
   useEffect(() => {
-    fetch('/api/status')
+    const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+
+    fetch(`/api/status?deviceId=${selectedMachineId}`, { headers })
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -128,14 +209,9 @@ export default function App() {
       })
       .catch(err => console.error('Failed to fetch status:', err));
 
-    fetch('/api/transactions')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) setTransactions(data.data || []);
-      })
-      .catch(err => console.error('Failed to fetch transactions:', err));
+    fetchTransactions();
 
-    fetch('/api/logs')
+    fetch('/api/logs', { headers })
       .then(res => res.json())
       .then(data => {
         if (data.success) setLogs(data.data || []);
@@ -182,7 +258,6 @@ export default function App() {
     });
 
     newSocket.on('system:state', (state) => {
-      // Legacy fallback
       setSelectedMachineId(curr => {
         if (curr === 'DEPOT-001') {
           setSystemState(prev => ({ ...prev, ...state }));
@@ -236,7 +311,7 @@ export default function App() {
     return () => {
       newSocket.disconnect();
     };
-  }, []);
+  }, [authToken]);
 
   const handleSimulatePayment = async (orderId) => {
     try {
@@ -266,6 +341,20 @@ export default function App() {
     }
   };
 
+  // Filter Tabs according to User Role
+  const isSuperAdmin = currentUser?.role === 'ADMIN';
+  const isClient = currentUser?.role === 'CLIENT';
+
+  const allTabs = [
+    { id: 'dashboard', label: isClient ? 'Monitor Cabang Saya' : 'Monitor & Kiosk', icon: Droplet, visible: true },
+    { id: 'fleet', label: 'Armada & Multi-Cabang', icon: Server, visible: isSuperAdmin },
+    { id: 'packages', label: 'Paket Air & Harga', icon: Layers, visible: true },
+    { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi, visible: true },
+    { id: 'inspector', label: 'Webhook & Live Log', icon: Terminal, visible: isSuperAdmin },
+    { id: 'transactions', label: isClient ? 'Riwayat Transaksi Cabang' : 'Riwayat Transaksi', icon: History, visible: true },
+    { id: 'hardware', label: 'Konfigurasi Wiring', icon: Cpu, visible: true }
+  ].filter(t => t.visible);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black pb-12 relative overflow-hidden font-sans">
       
@@ -294,56 +383,84 @@ export default function App() {
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-medium">
-                Otomatisasi Pengisian Air Terintegrasi Webhook DANA & ESP32
+                {isClient ? `Panel Mitra: ${selectedMachine?.name || selectedMachineId}` : 'Otomatisasi Pengisian Air Terintegrasi Webhook DANA & ESP32'}
               </p>
             </div>
           </div>
 
-          {/* Right Status Badges & Branch Selector */}
+          {/* Right Status Badges & Auth Section */}
           <div className="flex items-center gap-2.5">
             
-            {/* Machine / Branch Switcher */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-200">
-              <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <select 
-                value={selectedMachineId} 
-                onChange={(e) => handleSelectMachine(e.target.value)}
-                className="bg-transparent text-white font-bold outline-none cursor-pointer pr-1"
-                title="Pilih Cabang / Mesin Depot yang Sedang Dipantau"
-              >
-                {machines.length > 0 ? (
-                  machines.map(m => (
-                    <option key={m.id} value={m.id} className="bg-slate-900 text-white">
-                      {m.id}: {m.name} ({m.esp32Status === 'ONLINE' ? '🟢 Online' : '🔴 Offline'})
-                    </option>
-                  ))
-                ) : (
-                  <option value="DEPOT-001" className="bg-slate-900 text-white">DEPOT-001: Depot Pusat</option>
-                )}
-              </select>
-            </div>
+            {/* Machine / Branch Switcher (Only for Super Admin or Public) */}
+            {isSuperAdmin && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-200">
+                <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <select 
+                  value={selectedMachineId} 
+                  onChange={(e) => handleSelectMachine(e.target.value)}
+                  className="bg-transparent text-white font-bold outline-none cursor-pointer pr-1"
+                  title="Pilih Cabang / Mesin Depot yang Sedang Dipantau"
+                >
+                  {machines.length > 0 ? (
+                    machines.map(m => (
+                      <option key={m.id} value={m.id} className="bg-slate-900 text-white">
+                        {m.id}: {m.name} ({m.esp32Status === 'ONLINE' ? '🟢 Online' : '🔴 Offline'})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="DEPOT-001" className="bg-slate-900 text-white">DEPOT-001: Depot Pusat</option>
+                  )}
+                </select>
+              </div>
+            )}
 
-            {/* Database Badge */}
-            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-300">
-              <Database className="w-3.5 h-3.5 text-cyan-400" />
-              <span>{systemState?.databaseType || 'MySQL'}</span>
-            </div>
+            {/* If Client, Show Locked Branch Indicator */}
+            {isClient && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-cyan-500/40 text-xs font-bold text-cyan-300">
+                <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>{selectedMachineId} ({selectedMachine?.name || 'Cabang Anda'})</span>
+              </div>
+            )}
 
             {/* ESP32 Online / Offline Status */}
-            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border text-xs font-bold transition-all ${
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all ${
               systemState.esp32Status === 'ONLINE'
                 ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
                 : 'bg-rose-500/10 text-rose-300 border-rose-500/40'
             }`}>
               <span className={`w-2 h-2 rounded-full ${systemState.esp32Status === 'ONLINE' ? 'bg-emerald-400 animate-ping' : 'bg-rose-500'}`} />
-              <span>{systemState.esp32Status === 'ONLINE' ? `${selectedMachineId} ONLINE` : `${selectedMachineId} OFFLINE`}</span>
+              <span className="hidden sm:inline">{selectedMachineId}</span>
+              <span>{systemState.esp32Status === 'ONLINE' ? 'ONLINE' : 'OFFLINE'}</span>
             </div>
 
-            {/* WebSocket Status */}
-            <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-2xl border border-slate-800 font-mono">
-              <span className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-cyan-400' : 'bg-amber-400'}`} />
-              <span>WS: {socketConnected ? 'Live' : 'Connect'}</span>
-            </div>
+            {/* User Login / Profile Badge */}
+            {currentUser ? (
+              <div className="flex items-center gap-2">
+                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-bold border ${
+                  isSuperAdmin 
+                    ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' 
+                    : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                }`}>
+                  <span>{isSuperAdmin ? '👑 Admin Pusat' : `👤 ${currentUser.name}`}</span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-1.5 rounded-xl bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-800 transition-all cursor-pointer"
+                  title="Keluar (Logout)"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsLoginModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold text-xs shadow-md shadow-blue-500/20 hover:from-blue-500 hover:to-cyan-400 transition-all cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Login</span>
+              </button>
+            )}
+
           </div>
         </div>
       </header>
@@ -357,7 +474,9 @@ export default function App() {
           {/* Card 1: Today Revenue */}
           <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-emerald-500/40 transition-all">
             <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">Pendapatan Hari Ini</span>
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {isClient ? 'Omset Cabang Hari Ini' : 'Pendapatan Hari Ini'}
+              </span>
               <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
                 <DollarSign className="w-4 h-4" />
               </div>
@@ -373,7 +492,9 @@ export default function App() {
           {/* Card 2: Liters Dispensed */}
           <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-cyan-500/40 transition-all">
             <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">Air Terdistribusi</span>
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {isClient ? 'Air Terdistribusi Cabang' : 'Air Terdistribusi'}
+              </span>
               <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400">
                 <Droplet className="w-4 h-4" />
               </div>
@@ -402,34 +523,42 @@ export default function App() {
             </div>
           </div>
 
-          {/* Card 4: Webhook Domain & Branch Count */}
+          {/* Card 4: Webhook Domain or Filter Life */}
           <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-blue-500/40 transition-all">
             <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">Total Cabang Armada</span>
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {isClient ? 'Kesehatan Filter Air' : 'Total Cabang Armada'}
+              </span>
               <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
                 <Server className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-white font-mono">
-              {machines.length || 1} <span className="text-sm font-normal text-slate-400">Cabang</span>
-            </div>
-            <div className="text-[11px] text-cyan-400 mt-1 font-mono truncate">
-              {machines.filter(m => m.esp32Status === 'ONLINE').length} Mesin Online Terhubung
-            </div>
+            {isClient ? (
+              <>
+                <div className="text-xl sm:text-2xl font-black text-white font-mono">
+                  {Math.round(((selectedMachine?.filterUsedLiters || 0) / (selectedMachine?.filterLimitLiters || 10000)) * 100)}%
+                  <span className="text-sm font-normal text-slate-400"> Terpakai</span>
+                </div>
+                <div className="text-[11px] text-emerald-400 mt-1 font-mono">
+                  {(selectedMachine?.filterUsedLiters || 0).toFixed(0)} / {(selectedMachine?.filterLimitLiters || 10000).toLocaleString('id-ID')} Liter
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-xl sm:text-2xl font-black text-white font-mono">
+                  {machines.length || 1} <span className="text-sm font-normal text-slate-400">Cabang</span>
+                </div>
+                <div className="text-[11px] text-cyan-400 mt-1 font-mono truncate">
+                  {machines.filter(m => m.esp32Status === 'ONLINE').length} Mesin Online Terhubung
+                </div>
+              </>
+            )}
           </div>
         </div>
 
         {/* Navigation Tabs Pill Bar */}
         <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto">
-          {[
-            { id: 'dashboard', label: 'Monitor & Kiosk', icon: Droplet },
-            { id: 'fleet', label: 'Armada & Multi-Cabang', icon: Server },
-            { id: 'packages', label: 'Kelola Paket Air & Harga', icon: Layers },
-            { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi },
-            { id: 'inspector', label: 'Webhook & ESP32 Live Log', icon: Terminal },
-            { id: 'transactions', label: 'Riwayat Transaksi', icon: History },
-            { id: 'hardware', label: 'Konfigurasi & Wiring', icon: Cpu }
-          ].map(tab => {
+          {allTabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -454,7 +583,7 @@ export default function App() {
           })}
         </div>
 
-        {/* Tab 1: Dashboard */}
+        {/* Tab 1: Dashboard (Monitor & Kiosk) */}
         {activeTab === 'dashboard' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7">
@@ -479,8 +608,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Fleet Management (Multi-Cabang) */}
-        {activeTab === 'fleet' && (
+        {/* Tab 2: Fleet Management (Only Super Admin) */}
+        {activeTab === 'fleet' && isSuperAdmin && (
           <FleetManagementCard
             machines={machines}
             onRefresh={fetchMachines}
@@ -489,6 +618,7 @@ export default function App() {
               setActiveTab('dashboard');
             }}
             selectedMachineId={selectedMachineId}
+            authToken={authToken}
           />
         )}
 
@@ -502,8 +632,8 @@ export default function App() {
           <WifiSettingsCard systemState={systemState} />
         )}
 
-        {/* Tab 5: Webhook Inspector */}
-        {activeTab === 'inspector' && (
+        {/* Tab 5: Webhook Inspector (Only Super Admin) */}
+        {activeTab === 'inspector' && isSuperAdmin && (
           <WebhookInspector logs={logs} />
         )}
 
@@ -518,6 +648,13 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Login Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+      />
 
       {/* Footer */}
       <footer className="mt-14 text-center text-xs text-slate-500 font-mono">

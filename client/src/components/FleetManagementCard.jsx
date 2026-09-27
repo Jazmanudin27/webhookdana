@@ -18,18 +18,62 @@ import {
   AlertTriangle,
   RotateCcw,
   Sparkles,
-  Info
+  Info,
+  Users,
+  UserPlus,
+  Key,
+  Smartphone,
+  ShieldCheck
 } from 'lucide-react';
 
-export default function FleetManagementCard({ machines = [], onRefresh, onSelectMachine, selectedMachineId }) {
+export default function FleetManagementCard({ 
+  machines = [], 
+  onRefresh, 
+  onSelectMachine, 
+  selectedMachineId,
+  authToken = null
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [newFilterLimit, setNewFilterLimit] = useState(10000);
+  
+  // Optional Mitra Account during machine creation
+  const [createMitraAccount, setCreateMitraAccount] = useState(true);
+  const [mitraUsername, setMitraUsername] = useState('');
+  const [mitraPassword, setMitraPassword] = useState('123456');
+
+  // Dedicated User Management
+  const [users, setUsers] = useState([]);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [userForm, setUserForm] = useState({
+    username: '',
+    password: '',
+    name: '',
+    assignedMachineId: 'DEPOT-001',
+    phone: ''
+  });
+
   const [loading, setLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [actionMsg, setActionMsg] = useState(null);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setUsers(data.data);
+      }
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, [authToken]);
 
   const handleCopyLink = (machineId) => {
     const url = `${window.location.origin}/?machine=${machineId}`;
@@ -45,7 +89,10 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
     try {
       const res = await fetch('/api/machines', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        },
         body: JSON.stringify({
           id: newId,
           name: newName,
@@ -55,11 +102,34 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
       });
       const data = await res.json();
       if (data.success) {
+        // Auto create mitra account if checked
+        if (createMitraAccount && mitraUsername) {
+          try {
+            await fetch('/api/admin/users', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+              },
+              body: JSON.stringify({
+                username: mitraUsername,
+                password: mitraPassword || '123456',
+                name: `Mitra ${newName}`,
+                role: 'CLIENT',
+                assignedMachineId: newId.toUpperCase().trim()
+              })
+            });
+            fetchUsers();
+          } catch (e) {}
+        }
+
         setIsModalOpen(false);
         setNewId('');
         setNewName('');
         setNewLocation('');
         setNewFilterLimit(10000);
+        setMitraUsername('');
+        setMitraPassword('123456');
         setActionMsg({ type: 'success', text: `Cabang ${data.data?.name || newId} berhasil didaftarkan!` });
         if (onRefresh) onRefresh();
       } else {
@@ -73,6 +143,67 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
     }
   };
 
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    if (!userForm.username || !userForm.password || !userForm.name) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({
+          username: userForm.username,
+          password: userForm.password,
+          name: userForm.name,
+          role: 'CLIENT',
+          assignedMachineId: userForm.assignedMachineId,
+          phone: userForm.phone
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsUserModalOpen(false);
+        setUserForm({ username: '', password: '', name: '', assignedMachineId: 'DEPOT-001', phone: '' });
+        setActionMsg({ type: 'success', text: `Akun mitra untuk "${data.data?.username}" berhasil dibuat!` });
+        fetchUsers();
+      } else {
+        setActionMsg({ type: 'error', text: data.message });
+      }
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setActionMsg(null), 5000);
+    }
+  };
+
+  const handleDeleteUser = async (userId, username) => {
+    if (userId === 1 || username === 'admin') {
+      alert('Akun Super Admin tidak boleh dihapus!');
+      return;
+    }
+    if (!window.confirm(`Yakin ingin menghapus akun mitra "${username}"?`)) return;
+
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActionMsg({ type: 'success', text: `Akun "${username}" berhasil dihapus.` });
+        fetchUsers();
+      } else {
+        setActionMsg({ type: 'error', text: data.message });
+      }
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message });
+    }
+  };
+
   const handleDeleteMachine = async (machineId, machineName) => {
     if (machineId === 'DEPOT-001') {
       alert('Mesin Utama / Prototipe (DEPOT-001) tidak dapat dihapus!');
@@ -82,7 +213,10 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
       return;
     }
     try {
-      const res = await fetch(`/api/machines/${machineId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/machines/${machineId}`, { 
+        method: 'DELETE',
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      });
       const data = await res.json();
       if (data.success) {
         setActionMsg({ type: 'success', text: `Cabang ${machineId} berhasil dihapus.` });
@@ -100,7 +234,10 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
       return;
     }
     try {
-      const res = await fetch(`/api/machines/${machineId}/reset-filter`, { method: 'POST' });
+      const res = await fetch(`/api/machines/${machineId}/reset-filter`, { 
+        method: 'POST',
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+      });
       const data = await res.json();
       if (data.success) {
         setActionMsg({ type: 'success', text: `Filter ${machineId} berhasil di-reset ke 0 Liter.` });
@@ -119,7 +256,7 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
   const onlineCount = machines.filter(m => m.esp32Status === 'ONLINE').length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       
       {/* Action Notification Alert */}
       {actionMsg && (
@@ -186,7 +323,7 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
             Armada Mesin Depot Air (Fleet Management)
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Pantau dan kendalikan semua depot air di berbagai lokasi/cabang secara terpusat dari satu server cloud
+            Pantau status operasional, debit air, dan kesehatan filter tiap cabang dari satu server terpusat
           </p>
         </div>
 
@@ -372,8 +509,6 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
 
               {/* Bottom Actions */}
               <div className="pt-4 mt-4 border-t border-slate-800/80 flex items-center gap-2">
-                
-                {/* Select / View Machine in Main Dashboard */}
                 <button
                   onClick={() => onSelectMachine(machine.id)}
                   className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
@@ -386,11 +521,10 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
                   <span>{isSelected ? 'Sedang Dipantau' : 'Pilih Cabang Ini'}</span>
                 </button>
 
-                {/* Copy Kiosk Tablet Link */}
                 <button
                   onClick={() => handleCopyLink(machine.id)}
                   className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-all"
-                  title="Salin Link Kiosk Khusus Mesin Ini (Untuk Tablet/Layar di Cabang)"
+                  title="Salin Link Kiosk Khusus Mesin Ini"
                 >
                   {copiedId === machine.id ? (
                     <Check className="w-4 h-4 text-emerald-400" />
@@ -399,7 +533,6 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
                   )}
                 </button>
 
-                {/* Open Kiosk in New Tab */}
                 <a
                   href={`/?machine=${machine.id}`}
                   target="_blank"
@@ -410,7 +543,6 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
                   <ExternalLink className="w-4 h-4" />
                 </a>
 
-                {/* Delete button (except DEPOT-001) */}
                 {machine.id !== 'DEPOT-001' && (
                   <button
                     onClick={() => handleDeleteMachine(machine.id, machine.name)}
@@ -426,6 +558,90 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
         })}
       </div>
 
+      {/* SECTION: Akun Klien & Mitra Cabang (Data Isolation) */}
+      <div className="glass-card rounded-3xl p-6 sm:p-7 border border-slate-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800">
+          <div>
+            <h3 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
+              <Users className="w-5 h-5 text-cyan-400" />
+              Hak Akses & Akun Klien Mitra Cabang
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Setiap mitra cabang login menggunakan akunnya dan <strong>HANYA</strong> bisa melihat data omset cabangnya sendiri.
+            </p>
+          </div>
+
+          <button
+            onClick={() => setIsUserModalOpen(true)}
+            className="px-4 py-2 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs border border-slate-800 transition-all flex items-center gap-1.5"
+          >
+            <UserPlus className="w-4 h-4 text-cyan-400" />
+            <span>Buat Akun Mitra Baru</span>
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-950/80 text-slate-400 uppercase font-bold text-[11px] border-b border-slate-800">
+              <tr>
+                <th className="py-3 px-4">Pengguna</th>
+                <th className="py-3 px-4">Peran (Role)</th>
+                <th className="py-3 px-4">Cabang yang Ditugaskan</th>
+                <th className="py-3 px-4">Kontak HP</th>
+                <th className="py-3 px-4 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 font-sans">
+              {users.map((u) => (
+                <tr key={u.id} className="hover:bg-slate-900/40">
+                  <td className="py-3 px-4 font-bold text-white flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-xs">
+                      {u.role === 'ADMIN' ? '👑' : '👤'}
+                    </span>
+                    <div>
+                      <div>{u.name}</div>
+                      <div className="text-[11px] font-mono text-cyan-300 font-normal">@{u.username}</div>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                      u.role === 'ADMIN'
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      {u.role === 'ADMIN' ? 'Super Admin' : 'Klien Mitra'}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 font-mono">
+                    {u.role === 'ADMIN' ? (
+                      <span className="text-slate-400 italic">Semua Cabang (Pusat)</span>
+                    ) : (
+                      <span className="text-cyan-300 font-bold bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-800">
+                        {u.assignedMachineId || '-'}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-slate-400 font-mono">
+                    {u.phone || '-'}
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    {u.username !== 'admin' && (
+                      <button
+                        onClick={() => handleDeleteUser(u.id, u.username)}
+                        className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all"
+                        title="Hapus Akun Pengguna"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* MODAL: Tambah Cabang Baru */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
@@ -435,7 +651,7 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
               Daftarkan Cabang Depot Baru
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Setiap depot air di cabang baru harus memiliki ID Mesin unik (contoh: DEPOT-002, DEPOT-003).
+              Masukkan ID Mesin unik dan buat akun login untuk mitra pemilik cabang ini.
             </p>
 
             <form onSubmit={handleCreateMachine} className="mt-5 space-y-4">
@@ -448,12 +664,13 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
                   required
                   placeholder="Contoh: DEPOT-002"
                   value={newId}
-                  onChange={(e) => setNewId(e.target.value.toUpperCase())}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setNewId(val);
+                    if (!mitraUsername) setMitraUsername(`mitra_${val.toLowerCase().replace(/[^a-z0-9]/g, '')}`);
+                  }}
                   className="w-full px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Masukkan ID yang sama ke program sketch ESP32: <code className="text-cyan-300">DEVICE_ID = "{newId || 'DEPOT-002'}"</code>
-                </p>
               </div>
 
               <div>
@@ -463,7 +680,7 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
                 <input
                   type="text"
                   required
-                  placeholder="Contoh: Depot Air Cabang Jl. Sudirman"
+                  placeholder="Contoh: Depot Air Cabang Surabaya"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   className="w-full px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-white text-sm focus:outline-none focus:border-cyan-500"
@@ -483,23 +700,45 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Batas Umur Filter Air (Liter)
+              {/* Sekaligus Buat Akun Mitra */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createMitraAccount}
+                    onChange={(e) => setCreateMitraAccount(e.target.checked)}
+                    className="rounded text-cyan-500 focus:ring-0"
+                  />
+                  <span className="text-xs font-bold text-cyan-300">Sekaligus buatkan akun login untuk mitra cabang ini</span>
                 </label>
-                <input
-                  type="number"
-                  placeholder="10000"
-                  value={newFilterLimit}
-                  onChange={(e) => setNewFilterLimit(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
-                />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Sistem akan memberikan peringatan ganti filter jika telah mencapai 80% dari batas ini.
-                </p>
+
+                {createMitraAccount && (
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Username Mitra</label>
+                      <input
+                        type="text"
+                        value={mitraUsername}
+                        onChange={(e) => setMitraUsername(e.target.value.toLowerCase())}
+                        placeholder="mitra_depot02"
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Password</label>
+                      <input
+                        type="text"
+                        value={mitraPassword}
+                        onChange={(e) => setMitraPassword(e.target.value)}
+                        placeholder="123456"
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="pt-3 flex items-center justify-end gap-3">
+              <div className="pt-2 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
@@ -520,18 +759,115 @@ export default function FleetManagementCard({ machines = [], onRefresh, onSelect
         </div>
       )}
 
-      {/* Guide Box for Cloning ESP32 Units */}
+      {/* MODAL: Tambah Akun Mitra Baru */}
+      {isUserModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="glass-card max-w-md w-full p-6 sm:p-7 rounded-3xl border border-slate-800 relative shadow-2xl">
+            <h3 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-cyan-400" />
+              Buat Akun Klien Mitra
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Akun ini hanya dapat melihat omset dan mengendalikan cabang yang ditugaskan.
+            </p>
+
+            <form onSubmit={handleCreateUser} className="mt-5 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Nama Pemilik / Mitra *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Bpk. Budi Santoso"
+                  value={userForm.name}
+                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-800 rounded-2xl text-white text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Username *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="budidepot"
+                    value={userForm.username}
+                    onChange={(e) => setUserForm({ ...userForm, username: e.target.value.toLowerCase().trim() })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-2xl text-white text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Password *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="123456"
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-2xl text-white text-sm font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Cabang yang Ditugaskan *</label>
+                <select
+                  value={userForm.assignedMachineId}
+                  onChange={(e) => setUserForm({ ...userForm, assignedMachineId: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-2xl text-white text-sm font-bold"
+                >
+                  {machines.map(m => (
+                    <option key={m.id} value={m.id} className="bg-slate-900">
+                      {m.id} - {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">No. WhatsApp / HP</label>
+                <input
+                  type="text"
+                  placeholder="0812xxxxxxxx"
+                  value={userForm.phone}
+                  onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-800 rounded-2xl text-white text-sm font-mono"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsUserModalOpen(false)}
+                  className="px-4 py-2 rounded-2xl bg-slate-900 text-slate-300 hover:text-white border border-slate-800 text-xs font-bold"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-5 py-2 rounded-2xl bg-gradient-to-r from-[#118EEA] to-cyan-500 text-white font-bold text-xs shadow-xl shadow-blue-500/25"
+                >
+                  {loading ? 'Menyimpan...' : 'Simpan Akun'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Guide Box for Technicians in the field */}
       <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-3">
         <div className="flex items-center gap-2 font-bold text-white text-sm">
           <Info className="w-4 h-4 text-cyan-400" />
-          <span>Cara Menambah Mesin Depot Baru di Lapangan:</span>
+          <span>Cara Cepat Setting Device ID di Lapangan (Tanpa Laptop):</span>
         </div>
         <ol className="list-decimal list-inside space-y-1.5 text-slate-400 pl-1 leading-relaxed">
-          <li>Klik tombol <strong>"Tambah Cabang Baru"</strong> di atas dan masukkan ID (misal: <code className="text-cyan-300">DEPOT-002</code>).</li>
-          <li>Ambil ESP32 baru untuk cabang tersebut, buka file sketch <code className="text-cyan-300">DepotAir_ESP32.ino</code> di Arduino IDE.</li>
-          <li>Ubah baris: <code className="text-cyan-300">const String DEVICE_ID = "DEPOT-002";</code> dan upload ke ESP32.</li>
-          <li>Pasang di lokasi cabang. ESP32 akan langsung terhubung ke server pusat <code className="text-cyan-300">dana.aspartech.com</code> dan berstatus ONLINE.</li>
-          <li>Buka link kiosk tablet cabang (klik tombol Salin Link Kiosk) dan letakkan di etalase depot agar pelanggan bisa langsung memesan via QRIS DANA!</li>
+          <li>Nyalakan ESP32 di lokasi depot cabang baru.</li>
+          <li>Sambungkan WiFi HP teknisi ke Hotspot darurat: <code className="text-cyan-300">ESP32_Depot_Air</code> (Password: <code className="text-cyan-300">12345678</code>).</li>
+          <li>Buka browser HP ke: <code className="text-cyan-300">http://192.168.4.1</code></li>
+          <li>Di halaman tersebut, masukkan <strong>Nama WiFi</strong>, <strong>Password WiFi</strong>, dan ketik <strong>Device ID</strong> (misal: <code className="text-cyan-300">DEPOT-002</code>).</li>
+          <li>Klik Simpan. ESP32 otomatis menyimpan permanen ke memori Flash dan terhubung ke server pusat <code className="text-cyan-300">dana.aspartech.com</code>!</li>
         </ol>
       </div>
 
