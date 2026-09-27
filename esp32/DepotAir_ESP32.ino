@@ -453,8 +453,6 @@ void setup() {
 
     secureClient.setInsecure();
 
-    // Hapus NVS lama agar SSID/Password baru dari variabel langsung terpakai
-    clearWiFiNVS(); 
     loadStoredWiFi();
 
     if (!connectToWiFi(15)) {
