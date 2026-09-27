@@ -115,6 +115,12 @@ void loadStoredWiFi() {
     }
 }
 
+void clearWiFiNVS() {
+    preferences.begin("depot_wifi", false);
+    preferences.clear();
+    preferences.end();
+}
+
 void saveWiFiToNVS(String newSsid, String newPass) {
     preferences.begin("depot_wifi", false);
     preferences.putString("ssid", newSsid);
@@ -131,41 +137,44 @@ void saveWiFiToNVS(String newSsid, String newPass) {
 // ==========================================================
 // 5. KONEKSI KE WIFI
 // ==========================================================
-bool connectToWiFi(int timeoutSeconds = 20) {
+bool connectToWiFi(int timeoutSeconds = 15) {
     Serial.println("\n-------------------------------------------------");
-    Serial.print("📡 Target SSID    : "); Serial.println(wifi_ssid);
-    Serial.print("🔑 Target Password: "); Serial.println(wifi_password);
+    Serial.print("[WIFI] Target SSID     : "); Serial.println(wifi_ssid);
+    Serial.print("[WIFI] Target Password : "); Serial.println(wifi_password);
     Serial.println("-------------------------------------------------");
     Serial.flush();
 
+    // Reset radio WiFi agar tidak crash/stuck
+    WiFi.persistent(false);
+    WiFi.disconnect(true, true);
+    delay(200);
+    
     WiFi.mode(WIFI_STA);
-    delay(100);
-    
-    Serial.print("⏳ Mencoba menyambungkan ke ");
-    Serial.println(wifi_ssid);
-    
+    delay(200);
+
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
     unsigned long startAttemptTime = millis();
 
     while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime < (unsigned long)timeoutSeconds * 1000)) {
-        delay(500);
+        delay(250);
+        yield(); // Mencegah Watchdog Timer (TG1WDT) Reset
         Serial.print(".");
         Serial.flush();
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\n🎉 ✅ WiFi Terhubung Sukses!");
-        Serial.print("📍 IP Address ESP32: "); Serial.println(WiFi.localIP());
-        Serial.print("📶 Sinyal RSSI: "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
+        Serial.println("\n[WIFI] SUKSES TERHUBUNG!");
+        Serial.print("[WIFI] IP Address ESP32: "); Serial.println(WiFi.localIP());
+        Serial.print("[WIFI] Sinyal RSSI     : "); Serial.print(WiFi.RSSI()); Serial.println(" dBm");
         
         digitalWrite(BLUE_LED_PIN, HIGH);
         triggerBuzzer(2, 80, 80);
         isApMode = false;
         return true;
     } else {
-        Serial.println("\n❌ Gagal terhubung ke WiFi!");
-        Serial.print("⚠️ Status Code: "); Serial.println(WiFi.status());
+        Serial.println("\n[WIFI] Gagal terhubung!");
+        Serial.print("[WIFI] Status Code: "); Serial.println(WiFi.status());
         digitalWrite(BLUE_LED_PIN, LOW);
         return false;
     }
@@ -358,7 +367,8 @@ void checkOrderFromServer() {
 // 9. SETUP
 // ==========================================================
 void setup() {
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    // Matikan brownout detector agar tidak reset saat lonjakan arus WiFi
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
 
     Serial.begin(115200);
     delay(1000);
@@ -378,14 +388,16 @@ void setup() {
 
     secureClient.setInsecure();
 
+    // Hapus NVS lama agar SSID/Password baru dari variabel langsung terpakai
+    clearWiFiNVS(); 
     loadStoredWiFi();
 
-    if (!connectToWiFi(15)) {
+    if (!connectToWiFi(12)) {
         startEmergencyAP();
     }
 
     pinMode(BUTTON_STOP_PIN, INPUT_PULLUP);
-    pinMode(FLOW_SENSOR_PIN, INPUT); // D34 adalah input only (tanpa internal pullup)
+    pinMode(FLOW_SENSOR_PIN, INPUT);
     attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), pulseCounter, FALLING);
 }
 
