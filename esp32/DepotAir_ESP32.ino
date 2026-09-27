@@ -120,24 +120,43 @@ void saveWiFiToNVS(String newSsid, String newPass) {
 }
 
 // ==========================================================
-// 5. KONEKSI KE WIFI (Stabil & Anti-Hang)
+// 5. PEMINDAIAN & KONEKSI KE WIFI
 // ==========================================================
-bool connectToWiFi(int timeoutSeconds = 20) {
-    Serial.println("\n-------------------------------------------------");
-    Serial.print("📡 Mencoba menghubungkan ke WiFi SSID: ");
-    Serial.println(wifi_ssid);
-    Serial.print("🔑 Menggunakan Password: ");
-    Serial.println(wifi_password);
-    Serial.println("-------------------------------------------------");
+void scanNearbyWiFi() {
+    Serial.println("\n🔍 Memindai sinyal WiFi sekitar...");
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+        Serial.println("⚠️ Tidak ada jaringan WiFi yang ditemukan.");
+    } else {
+        Serial.printf("📶 Ditemukan %d jaringan WiFi:\n", n);
+        for (int i = 0; i < n; ++i) {
+            String foundSSID = WiFi.SSID(i);
+            bool isTarget = (foundSSID == wifi_ssid);
+            Serial.printf("   [%d] %s (%d dBm) %s\n", 
+                          i + 1, 
+                          foundSSID.c_str(), 
+                          WiFi.RSSI(i), 
+                          isTarget ? " <--- [TARGET HOTSPOT]" : "");
+        }
+    }
+}
 
-    WiFi.disconnect(true);
-    delay(400);
+bool connectToWiFi(int timeoutSeconds = 25) {
+    Serial.println("\n-------------------------------------------------");
+    Serial.print("📡 Target SSID    : "); Serial.println(wifi_ssid);
+    Serial.print("🔑 Target Password: "); Serial.println(wifi_password);
+    Serial.println("-------------------------------------------------");
+    Serial.flush();
 
     WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);
-    WiFi.setTxPower(WIFI_POWER_15dBm); // Mengurangi lonjakan arus RF agar tidak brownout/restart saat pakai daya USB
-    WiFi.setAutoReconnect(true);
+    delay(100);
 
+    // Scan untuk memastikan Hotspot HP terdeteksi oleh ESP32
+    scanNearbyWiFi();
+    delay(200);
+
+    Serial.print("\n⏳ Mencoba menyambungkan ke ");
+    Serial.println(wifi_ssid);
     WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
 
     unsigned long startAttemptTime = millis();
@@ -145,6 +164,7 @@ bool connectToWiFi(int timeoutSeconds = 20) {
     while (WiFi.status() != WL_CONNECTED && (millis() - startAttemptTime < (unsigned long)timeoutSeconds * 1000)) {
         delay(500);
         Serial.print(".");
+        Serial.flush();
     }
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -157,9 +177,8 @@ bool connectToWiFi(int timeoutSeconds = 20) {
         isApMode = false;
         return true;
     } else {
-        Serial.println("\n❌ Gagal terhubung ke WiFi dalam waktu " + String(timeoutSeconds) + " detik.");
-        Serial.print("⚠️ Status WiFi Code: "); Serial.println(WiFi.status());
-        Serial.println("💡 Tips: Pastikan Hotspot 'Jazz' dalam keadaan AKTIF dan jarak dekat dengan ESP32.");
+        Serial.println("\n❌ Gagal terhubung ke WiFi!");
+        Serial.print("⚠️ Status Code: "); Serial.println(WiFi.status());
         digitalWrite(BLUE_LED_PIN, LOW);
         return false;
     }
