@@ -25,8 +25,8 @@ WiFiClientSecure secureClient;
 // ==========================================================
 // 1. DEFAULT KONFIGURASI WIFI & SERVER CLOUD
 // ==========================================================
-String wifi_ssid     = "Jazz";       // SSID Hotspot HP
-String wifi_password = "12345678";   // Password Hotspot HP
+String wifi_ssid     = "TP-Link_71E8"; // SSID Router TP-Link
+String wifi_password = "12345678";     // Password WiFi
 
 const char* BASE_SERVER_URL = "https://dana.aspartech.com";
 
@@ -96,16 +96,18 @@ void loadStoredWiFi() {
     preferences.begin("depot_wifi", false);
     String storedSSID = preferences.getString("ssid", "");
     String storedPASS = preferences.getString("pass", "");
-    preferences.end();
 
-    if (storedSSID.length() > 0 && storedPASS.length() > 0) {
+    if (storedSSID.length() > 0 && storedPASS.length() > 0 && storedSSID != "Jazz") {
         wifi_ssid = storedSSID;
         wifi_password = storedPASS;
         Serial.print("📂 Membaca WiFi dari memori NVS ESP32: ");
         Serial.println(wifi_ssid);
     } else {
-        Serial.println("ℹ️ Memakai konfigurasi default: " + wifi_ssid);
+        preferences.putString("ssid", wifi_ssid);
+        preferences.putString("pass", wifi_password);
+        Serial.println("ℹ️ Memakai konfigurasi WiFi: " + wifi_ssid);
     }
+    preferences.end();
 }
 
 void saveWiFiToNVS(String newSsid, String newPass) {
