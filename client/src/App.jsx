@@ -21,7 +21,8 @@ import {
   Lock,
   LogOut,
   User,
-  ShieldAlert
+  ShieldAlert,
+  Gauge
 } from 'lucide-react';
 
 import WaterDispenserVisualizer from './components/WaterDispenserVisualizer';
