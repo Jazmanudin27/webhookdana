@@ -549,12 +549,17 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
   try {
     const { orderId, dispensedLiter, durationSeconds, status: fillStatus, deviceId } = req.body;
     const actualLiter = Number(dispensedLiter) || 0;
-    const isEmergency = fillStatus === 'EMERGENCY_STOP';
+    const isEmergency = fillStatus === 'EMERGENCY_STOP' || fillStatus === 'STOPPED';
+    const isIncomplete = fillStatus === 'INCOMPLETE';
     const targetDeviceId = (deviceId || req.query.deviceId || 'DEPOT-001').toUpperCase().trim();
     const machineState = getOrCreateMachineState(targetDeviceId);
 
+    let finalStatus = 'COMPLETED';
+    if (isEmergency) finalStatus = 'STOPPED';
+    else if (isIncomplete) finalStatus = 'INCOMPLETE';
+
     await db.updateTransaction(orderId, {
-      status: isEmergency ? 'STOPPED' : 'COMPLETED',
+      status: finalStatus,
       dispensedLiter: actualLiter,
       durationSeconds: durationSeconds || 0,
       completedAt: new Date().toISOString()
@@ -563,10 +568,19 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
     const tx = await db.findTransaction(orderId);
     await db.incrementMachineUsage(targetDeviceId, actualLiter, tx ? tx.amount : 0);
 
-    const logMsg = isEmergency 
-      ? `Pengisian dihentikan darurat [Cabang ${targetDeviceId}]: ${orderId} (${actualLiter}L)`
-      : `Pengisian Air Selesai [Cabang ${targetDeviceId}]: ${orderId} (${actualLiter}L)`;
-    const logItem = await db.addLog('ESP32', isEmergency ? 'WARNING' : 'SUCCESS', logMsg, req.body);
+    let logLevel = 'SUCCESS';
+    let logMsg = `Pengisian Air Selesai [Cabang ${targetDeviceId}]: ${orderId} (${actualLiter}L)`;
+
+    if (isEmergency) {
+      logLevel = 'WARNING';
+      logMsg = `Pengisian dihentikan darurat [Cabang ${targetDeviceId}]: ${orderId} (${actualLiter}L)`;
+    } else if (isIncomplete) {
+      logLevel = 'WARNING';
+      const targetL = tx ? (tx.targetLiter || '?') : '?';
+      logMsg = `Pengisian Kurang / Terhenti [Cabang ${targetDeviceId}]: ${orderId} (Terisi ${actualLiter}L dari ${targetL}L)`;
+    }
+
+    const logItem = await db.addLog('ESP32', logLevel, logMsg, req.body);
     io.emit('log:new', logItem);
 
     machineState.status = 'IDLE';
@@ -579,7 +593,7 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
       orderId,
       deviceId: targetDeviceId,
       dispensedLiter: actualLiter,
-      status: isEmergency ? 'STOPPED' : 'COMPLETED',
+      status: finalStatus,
       completedAt: new Date().toISOString()
     });
     io.emit('machine:updated', machineState);

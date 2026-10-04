@@ -579,7 +579,7 @@ async function getTodayStats(deviceId = null) {
           COALESCE(SUM(CASE WHEN dispensed_liter > 0 THEN dispensed_liter ELSE target_liter END), 0) as totalLiters,
           COUNT(*) as totalOrders
         FROM transactions 
-        WHERE DATE(created_at) = CURDATE() AND status = 'COMPLETED'
+        WHERE DATE(created_at) = CURDATE() AND status IN ('COMPLETED', 'INCOMPLETE', 'STOPPED')
       `;
       const params = [];
       if (deviceId) {
@@ -598,7 +598,8 @@ async function getTodayStats(deviceId = null) {
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  let todayTx = memTransactions.filter(t => t.createdAt && t.createdAt.startsWith(todayStr) && t.status === 'COMPLETED');
+  const validStatuses = ['COMPLETED', 'INCOMPLETE', 'STOPPED'];
+  let todayTx = memTransactions.filter(t => t.createdAt && t.createdAt.startsWith(todayStr) && validStatuses.includes(t.status));
   if (deviceId) {
     todayTx = todayTx.filter(t => (t.deviceId || 'DEPOT-001') === deviceId);
   }

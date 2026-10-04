@@ -35,6 +35,13 @@ export default function TransactionHistory({ transactions = [] }) {
             <Droplet className="w-3.5 h-3.5" /> Sedang Mengisi
           </span>
         );
+      case 'INCOMPLETE':
+      case 'PARTIAL':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <AlertTriangle className="w-3.5 h-3.5" /> Terhenti / Kurang
+          </span>
+        );
       case 'STOPPED':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
