@@ -595,11 +595,11 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 1: Dashboard (Monitor & Kiosk) */}
+        {/* Tab 1: Dashboard (Monitor & Kiosk Full Screen) */}
         {activeTab === 'dashboard' && (
-          <div className="transition-all duration-500">
+          <div className="w-full transition-all duration-500">
             {hasActiveTransaction ? (
-              <div className="max-w-4xl mx-auto animate-fadeIn">
+              <div className="w-full animate-fadeIn">
                 <WaterDispenserVisualizer
                   systemState={systemState}
                   telemetry={telemetry}
@@ -609,7 +609,7 @@ export default function App() {
                 />
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto animate-fadeIn">
+              <div className="w-full animate-fadeIn">
                 <OrderSimulator
                   onOrderCreated={(order) => setActivePendingOrder(order)}
                   onSimulatePayment={handleSimulatePayment}
