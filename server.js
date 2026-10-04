@@ -516,10 +516,23 @@ app.get('/api/esp32/check-order', authenticateEsp32, async (req, res) => {
   });
 });
 
-// Endpoint Kontrol Tombol Kucur Air dari Web (Multi-Cabang)
+// Endpoint Kontrol Tombol Kucur Air dari Web (Multi-Cabang & Multi-Tenant Isolated)
 app.post('/api/dispenser/action', (req, res) => {
   const { action, deviceId } = req.body; // 'TOGGLE' | 'START' | 'PAUSE' | 'RESUME' | 'STOP'
-  const targetDeviceId = (deviceId || 'DEPOT-001').toUpperCase().trim();
+  let targetDeviceId = (deviceId || 'DEPOT-001').toUpperCase().trim();
+
+  // Isolasi Tenant: Mitra Client DILARANG mengontrol mesin cabang lain
+  if (req.user && req.user.role === 'CLIENT') {
+    const assigned = (req.user.assignedMachineId || 'DEPOT-001').toUpperCase();
+    if (targetDeviceId !== assigned) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Akses ditolak: Anda hanya berwenang mengontrol cabang Anda sendiri [${assigned}]!` 
+      });
+    }
+    targetDeviceId = assigned;
+  }
+
   const machineState = getOrCreateMachineState(targetDeviceId);
   
   if (action === 'TOGGLE') {
