@@ -364,49 +364,49 @@ export default function App() {
   ].filter(t => t.visible);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black pb-12 relative overflow-hidden font-sans">
+    <div className={`h-screen max-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black relative overflow-hidden font-sans ${currentUser ? 'min-h-screen h-auto overflow-y-auto pb-12' : ''}`}>
       
       {/* Dynamic Ambient Blur Mesh */}
-      <div className="absolute top-0 left-1/4 w-[600px] h-[300px] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute top-1/3 right-10 w-[500px] h-[300px] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-0 left-1/4 w-[500px] h-[250px] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/3 right-10 w-[400px] h-[250px] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
 
-      {/* Top Header */}
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-2xl sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 py-3 flex items-center justify-between">
+      {/* Top Header (Slim & Compact) */}
+      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-2xl shrink-0 z-50">
+        <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between ${currentUser ? 'h-14 py-2' : 'h-12 py-1.5'}`}>
           
           {/* Brand Logo */}
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-[#118EEA] via-blue-600 to-cyan-400 p-0.5 shadow-xl shadow-blue-500/30">
-              <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-                <Droplet className="w-6 h-6 text-cyan-400 fill-cyan-400/20" />
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#118EEA] via-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-blue-500/30 shrink-0">
+              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
+                <Droplet className="w-4 h-4 text-cyan-400 fill-cyan-400/20" />
               </div>
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-black text-white tracking-tight text-lg sm:text-xl">
+                <h1 className="font-black text-white tracking-tight text-sm sm:text-base">
                   DEPOT AIR DANA
                 </h1>
-                <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-[#118EEA]/20 text-cyan-300 border border-cyan-500/30">
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-[#118EEA]/20 text-cyan-300 border border-cyan-500/30">
                   SMART IOT
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">
+              <p className="text-[10px] text-slate-400 font-medium hidden sm:block leading-none mt-0.5">
                 {isClient ? `Panel Mitra: ${selectedMachine?.name || selectedMachineId}` : 'Otomatisasi Pengisian Air Terintegrasi Webhook DANA & ESP32'}
               </p>
             </div>
           </div>
 
           {/* Right Status Badges & Auth Section */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             
             {/* Machine / Branch Switcher (Only for Super Admin or Public) */}
             {isSuperAdmin && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-200">
-                <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-semibold text-slate-200">
+                <MapPin className="w-3 h-3 text-cyan-400 shrink-0" />
                 <select 
                   value={selectedMachineId} 
                   onChange={(e) => handleSelectMachine(e.target.value)}
-                  className="bg-transparent text-white font-bold outline-none cursor-pointer pr-1"
+                  className="bg-transparent text-white font-bold outline-none cursor-pointer pr-1 text-xs"
                   title="Pilih Cabang / Mesin Depot yang Sedang Dipantau"
                 >
                   {machines.length > 0 ? (
@@ -424,14 +424,14 @@ export default function App() {
 
             {/* If Client, Show Locked Branch Indicator */}
             {isClient && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-cyan-500/40 text-xs font-bold text-cyan-300">
-                <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-cyan-500/40 text-xs font-bold text-cyan-300">
+                <MapPin className="w-3 h-3 text-cyan-400 shrink-0" />
                 <span>{selectedMachineId} ({selectedMachine?.name || 'Cabang Anda'})</span>
               </div>
             )}
 
             {/* ESP32 Online / Offline Status */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-bold transition-all ${
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all ${
               systemState.esp32Status === 'ONLINE'
                 ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
                 : 'bg-rose-500/10 text-rose-300 border-rose-500/40'
@@ -444,7 +444,7 @@ export default function App() {
             {/* User Login / Profile Badge */}
             {currentUser ? (
               <div className="flex items-center gap-2">
-                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-bold border ${
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold border ${
                   isSuperAdmin 
                     ? 'bg-purple-500/15 text-purple-300 border-purple-500/30' 
                     : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
@@ -462,7 +462,7 @@ export default function App() {
             ) : (
               <button
                 onClick={() => setIsLoginModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold text-xs shadow-md shadow-blue-500/20 hover:from-blue-500 hover:to-cyan-400 transition-all cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold text-xs shadow-md shadow-blue-500/20 hover:from-blue-500 hover:to-cyan-400 transition-all cursor-pointer"
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>Login</span>
@@ -474,7 +474,7 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 flex-1 w-full space-y-6 relative z-10">
+      <main className={`max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex-1 w-full relative z-10 flex flex-col justify-center overflow-hidden ${currentUser ? 'mt-6 space-y-6 overflow-y-auto' : 'py-1 sm:py-2'}`}>
         
         {/* Top Summary Stats Cards (Hanya muncul jika sudah Login sebagai Admin / Mitra) */}
         {currentUser && (
@@ -671,10 +671,12 @@ export default function App() {
         onLoginSuccess={handleLoginSuccess}
       />
 
-      {/* Footer */}
-      <footer className="mt-14 text-center text-xs text-slate-500 font-mono">
-        AsparTech • Sistem Depot Air Isi Ulang Otomatis Terintegrasi DANA Sandbox & ESP32
-      </footer>
+      {/* Footer (Hanya muncul jika sudah login admin) */}
+      {currentUser && (
+        <footer className="mt-8 text-center text-xs text-slate-500 font-mono">
+          AsparTech • Sistem Depot Air Isi Ulang Otomatis Terintegrasi DANA Sandbox & ESP32
+        </footer>
+      )}
     </div>
   );
 }
