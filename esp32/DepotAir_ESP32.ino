@@ -64,9 +64,11 @@ const int BUTTON_LED_PIN  = 33; // LED Tombol 12V via Transistor NPN (D33)
 const int FLOW_SENSOR_PIN = 34; // Sinyal Kuning Sensor Flow YF-S201 (D34)
 const int BUZZER_PIN      = 25; // Buzzer (D25)
 
-// Logika Relay (Active LOW)
-const int RELAY_ON  = LOW;
-const int RELAY_OFF = HIGH;
+// Logika Relay Solenoid Valve (Active HIGH: HIGH = Buka Keran, LOW = Tutup Keran)
+// Jika relay Anda kebalik (saat bayar langsung buka), ubah flag ini (true <-> false)
+const bool RELAY_ACTIVE_LOW = false; 
+const int RELAY_ON  = RELAY_ACTIVE_LOW ? LOW  : HIGH;
+const int RELAY_OFF = RELAY_ACTIVE_LOW ? HIGH : LOW;
 
 // Logika LED Tombol via Transistor NPN (HIGH = transistor ON = LED nyala)
 const int BTN_LED_ON  = HIGH;
