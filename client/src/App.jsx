@@ -345,6 +345,14 @@ export default function App() {
   const isSuperAdmin = currentUser?.role === 'ADMIN';
   const isClient = currentUser?.role === 'CLIENT';
 
+  // Smart Water Dispenser visualizer hanya muncul setelah pembayaran berhasil (PAID / FILLING / PAUSED)
+  const hasActiveTransaction = Boolean(
+    systemState?.status === 'PAID' || 
+    systemState?.status === 'FILLING' || 
+    systemState?.status === 'PAUSED' ||
+    (systemState?.activeOrder && systemState?.status !== 'IDLE')
+  );
+
   const allTabs = [
     { id: 'dashboard', label: isClient ? 'Monitor Cabang Saya' : 'Monitor & Kiosk', icon: Droplet, visible: true },
     { id: 'fleet', label: 'Armada & Multi-Cabang', icon: Server, visible: isSuperAdmin },
@@ -585,26 +593,29 @@ export default function App() {
 
         {/* Tab 1: Dashboard (Monitor & Kiosk) */}
         {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-7">
-              <WaterDispenserVisualizer
-                systemState={systemState}
-                telemetry={telemetry}
-                onEmergencyStop={handleEmergencyStop}
-                selectedMachineId={selectedMachineId}
-                selectedMachine={selectedMachine}
-              />
-            </div>
-            <div className="lg:col-span-5">
-              <OrderSimulator
-                onOrderCreated={(order) => setActivePendingOrder(order)}
-                onSimulatePayment={handleSimulatePayment}
-                activePendingOrder={activePendingOrder}
-                systemState={systemState}
-                selectedMachineId={selectedMachineId}
-                selectedMachine={selectedMachine}
-              />
-            </div>
+          <div className="transition-all duration-500">
+            {hasActiveTransaction ? (
+              <div className="max-w-4xl mx-auto animate-fadeIn">
+                <WaterDispenserVisualizer
+                  systemState={systemState}
+                  telemetry={telemetry}
+                  onEmergencyStop={handleEmergencyStop}
+                  selectedMachineId={selectedMachineId}
+                  selectedMachine={selectedMachine}
+                />
+              </div>
+            ) : (
+              <div className="max-w-2xl mx-auto animate-fadeIn">
+                <OrderSimulator
+                  onOrderCreated={(order) => setActivePendingOrder(order)}
+                  onSimulatePayment={handleSimulatePayment}
+                  activePendingOrder={activePendingOrder}
+                  systemState={systemState}
+                  selectedMachineId={selectedMachineId}
+                  selectedMachine={selectedMachine}
+                />
+              </div>
+            )}
           </div>
         )}
 

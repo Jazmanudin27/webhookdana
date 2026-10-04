@@ -114,7 +114,7 @@ setInterval(async () => {
     if (m.esp32LastSeen) {
       const elapsed = now - new Date(m.esp32LastSeen).getTime();
       const wasOnline = m.esp32Status === 'ONLINE';
-      if (elapsed > 25000) {
+      if (elapsed > 45000) {
         m.esp32Status = 'OFFLINE';
         if (wasOnline) {
           db.addLog('ESP32', 'WARNING', `ESP32 Mesin [${mId}] Terputus (Heartbeat Timeout)`);
@@ -466,9 +466,13 @@ app.get('/api/esp32/check-order', async (req, res) => {
     });
   }
 
-  // 3. Standby / IDLE / FILLING
+  // 3. Standby / IDLE / FILLING / PAUSED
+  let returnStatus = 'IDLE';
+  if (machineState.status === 'FILLING') returnStatus = 'FILLING';
+  else if (machineState.status === 'PAUSED') returnStatus = 'PAUSED';
+
   return res.status(200).json({
-    status: machineState.status === 'FILLING' ? 'FILLING' : 'IDLE',
+    status: returnStatus,
     deviceId,
     orderId: machineState.activeOrder ? machineState.activeOrder.orderId : null,
     targetLiter: machineState.activeOrder ? machineState.activeOrder.targetLiter : 0,
@@ -553,6 +557,16 @@ app.post('/api/esp32/finish-fill', async (req, res) => {
     const isIncomplete = fillStatus === 'INCOMPLETE';
     const targetDeviceId = (deviceId || req.query.deviceId || 'DEPOT-001').toUpperCase().trim();
     const machineState = getOrCreateMachineState(targetDeviceId);
+
+    // Refresh Heartbeat agar ESP32 tetap ONLINE saat kirim laporan selesai
+    machineState.esp32LastSeen = new Date().toISOString();
+    machineState.esp32Ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || machineState.esp32Ip || 'ESP32-Client';
+    machineState.esp32Status = 'ONLINE';
+    db.updateMachineStatus(targetDeviceId, {
+      status: 'ONLINE',
+      ip: machineState.esp32Ip,
+      lastSeen: machineState.esp32LastSeen
+    });
 
     let finalStatus = 'COMPLETED';
     if (isEmergency) finalStatus = 'STOPPED';

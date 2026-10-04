@@ -610,8 +610,12 @@ void processNetCommands() {
 
             case CMD_STOP:
                 if (!isStale && (isFilling || isWaitingButton)) {
-                    Serial.println("\n🛑 [WEB EMERGENCY STOP] Pembatalan diterima dari Website!");
-                    stopFilling(false);
+                    if (isPaused) {
+                        Serial.println("ℹ️ [CMD_STOP Diabaikan] Mesin sedang dalam status PAUSED lokal.");
+                    } else {
+                        Serial.println("\n🛑 [WEB EMERGENCY STOP] Pembatalan diterima dari Website!");
+                        stopFilling(false);
+                    }
                 }
                 break;
 
@@ -634,27 +638,40 @@ void processNetCommands() {
 // ==========================================================
 // 8. NETWORK TASK (CORE 0) - POLLING & TELEMETRY
 // ==========================================================
-void sendFinishReport(WiFiClientSecure& client, const FinishMsg& msg) {
+unsigned long lastSuccessfulPollTime = 0;
+int consecutivePollFailures = 0;
+
+void sendFinishReport(const FinishMsg& msg) {
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(5); // 5 detik socket timeout
+
     HTTPClient http;
-    http.begin(client, urlFinishFill);
-    http.addHeader("Content-Type", "application/json");
+    http.setReuse(false);
     http.setTimeout(4000);
 
-    StaticJsonDocument<256> doc;
-    doc["deviceId"]       = msg.deviceId;
-    doc["orderId"]        = msg.orderId;
-    doc["dispensedLiter"] = msg.liter;
-    doc["status"]         = msg.statusStr;
+    if (http.begin(client, urlFinishFill)) {
+        http.addHeader("Content-Type", "application/json");
 
-    String jsonBody;
-    serializeJson(doc, jsonBody);
+        StaticJsonDocument<256> doc;
+        doc["deviceId"]       = msg.deviceId;
+        doc["orderId"]        = msg.orderId;
+        doc["dispensedLiter"] = msg.liter;
+        doc["status"]         = msg.statusStr;
 
-    int code = http.POST(jsonBody);
-    http.end();
-    Serial.printf("📤 [NET] Laporan selesai terkirim [%s] (HTTP %d)\n", msg.statusStr, code);
+        String jsonBody;
+        serializeJson(doc, jsonBody);
+
+        int code = http.POST(jsonBody);
+        http.end();
+        Serial.printf("📤 [NET] Laporan selesai terkirim [%s] (HTTP %d)\n", msg.statusStr, code);
+    } else {
+        Serial.println("⚠️ [NET] Gagal inisialisasi koneksi untuk kirim laporan selesai");
+    }
+    client.stop(); // Bersihkan SSL context secara tuntas & bebaskan buffer RAM mbedTLS!
 }
 
-void pollServer(WiFiClientSecure& client) {
+void pollServer() {
     // Ambil snapshot status mesin
     String stateStr = "IDLE";
     if (isWaitingButton)            stateStr = "WAITING";
@@ -685,12 +702,27 @@ void pollServer(WiFiClientSecure& client) {
 
     unsigned long requestStart = millis();
 
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(4); // 4 detik timeout soket anti macet
+
     HTTPClient http;
-    http.begin(client, url);
+    http.setReuse(false);
     http.setTimeout(4000);
+
+    if (!http.begin(client, url)) {
+        Serial.println("⚠️ [NET] Gagal inisialisasi begin HTTP GET");
+        client.stop();
+        consecutivePollFailures++;
+        return;
+    }
+
     int httpCode = http.GET();
 
     if (httpCode == HTTP_CODE_OK) {
+        lastSuccessfulPollTime = millis();
+        consecutivePollFailures = 0;
+
         String payload = http.getString();
         StaticJsonDocument<512> doc;
         if (!deserializeJson(doc, payload)) {
@@ -712,24 +744,34 @@ void pollServer(WiFiClientSecure& client) {
                     cmd.type = CMD_PAID;
                     strlcpy(cmd.orderId, doc["orderId"] | "", sizeof(cmd.orderId));
                     cmd.targetLiter = doc["targetLiter"] | 0.0f;
-                } else if (strcmp(status, "IDLE") == 0 || strcmp(status, "EMERGENCY_STOP") == 0 ||
-                           strcmp(status, "STOP") == 0) {
+                } else if (strcmp(status, "EMERGENCY_STOP") == 0 || strcmp(status, "STOP") == 0) {
                     cmd.type = CMD_STOP;
+                } else if (strcmp(status, "IDLE") == 0) {
+                    // Hanya set STOP jika tidak sedang dijeda lokal
+                    if (!isPaused) {
+                        cmd.type = CMD_STOP;
+                    }
                 }
 
                 if (cmd.type != 0) xQueueSend(cmdQueue, &cmd, 0);
             }
         }
-    } else if (httpCode < 0) {
-        Serial.printf("⚠️ [NET] Polling gagal: %s\n", http.errorToString(httpCode).c_str());
+    } else {
+        consecutivePollFailures++;
+        if (httpCode < 0) {
+            Serial.printf("⚠️ [NET] Polling gagal: %s (gagal ke-%d)\n", http.errorToString(httpCode).c_str(), consecutivePollFailures);
+        } else {
+            Serial.printf("⚠️ [NET] Polling HTTP %d (gagal ke-%d)\n", httpCode, consecutivePollFailures);
+        }
     }
+
     http.end();
+    client.stop(); // Bersihkan socket dan bebaskan memori mbedtls
 }
 
 void netTask(void* param) {
-    WiFiClientSecure client;
-    client.setInsecure();
     unsigned long lastPoll = 0;
+    lastSuccessfulPollTime = millis();
 
     for (;;) {
         if (isApMode || netPaused) {
@@ -739,6 +781,7 @@ void netTask(void* param) {
 
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("⚠️ [NET] WiFi terputus, mencoba koneksi ulang...");
+            WiFi.disconnect();
             WiFi.reconnect();
             vTaskDelay(pdMS_TO_TICKS(3000));
             continue;
@@ -747,14 +790,25 @@ void netTask(void* param) {
         // 1. Prioritas: kirim laporan selesai jika ada
         FinishMsg msg;
         while (xQueueReceive(finishQueue, &msg, 0) == pdTRUE) {
-            sendFinishReport(client, msg);
+            sendFinishReport(msg);
+            vTaskDelay(pdMS_TO_TICKS(100)); // Jeda 100ms agar port TCP/SSL bersih
         }
 
         // 2. Polling rutin / segera jika ada aksi lokal
         if (pollNow || millis() - lastPoll >= POLL_INTERVAL) {
             pollNow = false;
             lastPoll = millis();
-            pollServer(client);
+            pollServer();
+        }
+
+        // 3. AUTO-RECOVERY ANTI CABUT COLOKAN:
+        // Jika tidak ada respon server > 35 detik saat standby, restart koneksi WiFi secara otomatis!
+        if (millis() - lastSuccessfulPollTime > 35000 && !isFilling) {
+            Serial.println("🚨 [NET RECOVERY] 35 detik tanpa respon server, reset WiFi otomatis...");
+            WiFi.disconnect();
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            WiFi.reconnect();
+            lastSuccessfulPollTime = millis();
         }
 
         vTaskDelay(pdMS_TO_TICKS(20));
