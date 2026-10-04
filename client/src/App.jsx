@@ -356,11 +356,11 @@ export default function App() {
   const allTabs = [
     { id: 'dashboard', label: isClient ? 'Monitor Cabang Saya' : 'Monitor & Kiosk', icon: Droplet, visible: true },
     { id: 'fleet', label: 'Armada & Multi-Cabang', icon: Server, visible: isSuperAdmin },
-    { id: 'packages', label: 'Paket Air & Harga', icon: Layers, visible: true },
-    { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi, visible: true },
+    { id: 'packages', label: 'Paket Air & Harga', icon: Layers, visible: Boolean(currentUser) },
+    { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi, visible: Boolean(currentUser) },
     { id: 'inspector', label: 'Webhook & Live Log', icon: Terminal, visible: isSuperAdmin },
-    { id: 'transactions', label: isClient ? 'Riwayat Transaksi Cabang' : 'Riwayat Transaksi', icon: History, visible: true },
-    { id: 'hardware', label: 'Konfigurasi Wiring', icon: Cpu, visible: true }
+    { id: 'transactions', label: isClient ? 'Riwayat Transaksi Cabang' : 'Riwayat Transaksi', icon: History, visible: Boolean(currentUser) },
+    { id: 'hardware', label: 'Konfigurasi Wiring', icon: Cpu, visible: Boolean(currentUser) }
   ].filter(t => t.visible);
 
   return (
@@ -476,120 +476,124 @@ export default function App() {
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 flex-1 w-full space-y-6 relative z-10">
         
-        {/* Top Summary Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          
-          {/* Card 1: Today Revenue */}
-          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-emerald-500/40 transition-all">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">
-                {isClient ? 'Omset Cabang Hari Ini' : 'Pendapatan Hari Ini'}
-              </span>
-              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
-                <DollarSign className="w-4 h-4" />
+        {/* Top Summary Stats Cards (Hanya muncul jika sudah Login sebagai Admin / Mitra) */}
+        {currentUser && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-fadeIn">
+            
+            {/* Card 1: Today Revenue */}
+            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-emerald-500/40 transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  {isClient ? 'Omset Cabang Hari Ini' : 'Pendapatan Hari Ini'}
+                </span>
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
+                Rp {(systemState.totalRevenueToday || 0).toLocaleString('id-ID')}
+              </div>
+              <div className="text-[11px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" /> Transaksi DANA Sukses
               </div>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
-              Rp {(systemState.totalRevenueToday || 0).toLocaleString('id-ID')}
-            </div>
-            <div className="text-[11px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" /> Transaksi DANA Sukses
-            </div>
-          </div>
 
-          {/* Card 2: Liters Dispensed */}
-          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-cyan-500/40 transition-all">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">
-                {isClient ? 'Air Terdistribusi Cabang' : 'Air Terdistribusi'}
-              </span>
-              <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400">
-                <Droplet className="w-4 h-4" />
+            {/* Card 2: Liters Dispensed */}
+            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-cyan-500/40 transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  {isClient ? 'Air Terdistribusi Cabang' : 'Air Terdistribusi'}
+                </span>
+                <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400">
+                  <Droplet className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-cyan-300 font-mono tracking-tight">
+                {(systemState.totalWaterDispensedToday || 0).toFixed(1)} <span className="text-sm font-normal text-slate-400">Liter</span>
+              </div>
+              <div className="text-[11px] text-slate-400 font-medium mt-1">
+                Flow Sensor YF-S201 GPIO 34
               </div>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-cyan-300 font-mono tracking-tight">
-              {(systemState.totalWaterDispensedToday || 0).toFixed(1)} <span className="text-sm font-normal text-slate-400">Liter</span>
-            </div>
-            <div className="text-[11px] text-slate-400 font-medium mt-1">
-              Flow Sensor YF-S201 GPIO 34
-            </div>
-          </div>
 
-          {/* Card 3: Total Orders */}
-          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-purple-500/40 transition-all">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">Total Pesanan</span>
-              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
-                <Layers className="w-4 h-4" />
+            {/* Card 3: Total Orders */}
+            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-purple-500/40 transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider">Total Pesanan</span>
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+                  <Layers className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-purple-300 font-mono tracking-tight">
+                {transactions.length} <span className="text-sm font-normal text-slate-400">Pesanan</span>
+              </div>
+              <div className="text-[11px] text-slate-400 font-medium mt-1">
+                {transactions.filter(t => t.status === 'COMPLETED').length} sukses terisi penuh
               </div>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-purple-300 font-mono tracking-tight">
-              {transactions.length} <span className="text-sm font-normal text-slate-400">Pesanan</span>
-            </div>
-            <div className="text-[11px] text-slate-400 font-medium mt-1">
-              {transactions.filter(t => t.status === 'COMPLETED').length} sukses terisi penuh
-            </div>
-          </div>
 
-          {/* Card 4: Webhook Domain or Filter Life */}
-          <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-blue-500/40 transition-all">
-            <div className="flex items-center justify-between text-slate-400 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider">
-                {isClient ? 'Kesehatan Filter Air' : 'Total Cabang Armada'}
-              </span>
-              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
-                <Server className="w-4 h-4" />
+            {/* Card 4: Webhook Domain or Filter Life */}
+            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-blue-500/40 transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  {isClient ? 'Kesehatan Filter Air' : 'Total Cabang Armada'}
+                </span>
+                <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                  <Server className="w-4 h-4" />
+                </div>
               </div>
+              {isClient ? (
+                <>
+                  <div className="text-xl sm:text-2xl font-black text-white font-mono">
+                    {Math.round(((selectedMachine?.filterUsedLiters || 0) / (selectedMachine?.filterLimitLiters || 10000)) * 100)}%
+                    <span className="text-sm font-normal text-slate-400"> Terpakai</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-400 mt-1 font-mono">
+                    {(selectedMachine?.filterUsedLiters || 0).toFixed(0)} / {(selectedMachine?.filterLimitLiters || 10000).toLocaleString('id-ID')} Liter
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xl sm:text-2xl font-black text-white font-mono">
+                    {machines.length || 1} <span className="text-sm font-normal text-slate-400">Cabang</span>
+                  </div>
+                  <div className="text-[11px] text-cyan-400 mt-1 font-mono truncate">
+                    {machines.filter(m => m.esp32Status === 'ONLINE').length} Mesin Online Terhubung
+                  </div>
+                </>
+              )}
             </div>
-            {isClient ? (
-              <>
-                <div className="text-xl sm:text-2xl font-black text-white font-mono">
-                  {Math.round(((selectedMachine?.filterUsedLiters || 0) / (selectedMachine?.filterLimitLiters || 10000)) * 100)}%
-                  <span className="text-sm font-normal text-slate-400"> Terpakai</span>
-                </div>
-                <div className="text-[11px] text-emerald-400 mt-1 font-mono">
-                  {(selectedMachine?.filterUsedLiters || 0).toFixed(0)} / {(selectedMachine?.filterLimitLiters || 10000).toLocaleString('id-ID')} Liter
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-xl sm:text-2xl font-black text-white font-mono">
-                  {machines.length || 1} <span className="text-sm font-normal text-slate-400">Cabang</span>
-                </div>
-                <div className="text-[11px] text-cyan-400 mt-1 font-mono truncate">
-                  {machines.filter(m => m.esp32Status === 'ONLINE').length} Mesin Online Terhubung
-                </div>
-              </>
-            )}
           </div>
-        </div>
+        )}
 
-        {/* Navigation Tabs Pill Bar */}
-        <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto">
-          {allTabs.map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
-                  isActive
-                    ? 'bg-gradient-to-r from-[#118EEA] to-cyan-500 text-white shadow-xl shadow-blue-500/25 scale-[1.02]'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {tab.id === 'fleet' && machines.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900 text-cyan-300 font-mono">
-                    {machines.length}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {/* Navigation Tabs Pill Bar (Hanya muncul jika sudah Login) */}
+        {currentUser && (
+          <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto animate-fadeIn">
+            {allTabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+                    isActive
+                      ? 'bg-gradient-to-r from-[#118EEA] to-cyan-500 text-white shadow-xl shadow-blue-500/25 scale-[1.02]'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                  {tab.id === 'fleet' && machines.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900 text-cyan-300 font-mono">
+                      {machines.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Tab 1: Dashboard (Monitor & Kiosk) */}
         {activeTab === 'dashboard' && (
@@ -634,12 +638,12 @@ export default function App() {
         )}
 
         {/* Tab 3: Packages */}
-        {activeTab === 'packages' && (
+        {activeTab === 'packages' && currentUser && (
           <PackageManagerCard onPackagesChanged={() => {}} />
         )}
 
         {/* Tab 4: WiFi */}
-        {activeTab === 'wifi' && (
+        {activeTab === 'wifi' && currentUser && (
           <WifiSettingsCard systemState={systemState} />
         )}
 
@@ -649,12 +653,12 @@ export default function App() {
         )}
 
         {/* Tab 6: Transactions */}
-        {activeTab === 'transactions' && (
+        {activeTab === 'transactions' && currentUser && (
           <TransactionHistory transactions={transactions} />
         )}
 
         {/* Tab 7: Hardware & Docs */}
-        {activeTab === 'hardware' && (
+        {activeTab === 'hardware' && currentUser && (
           <HardwareConfigGuide baseUrl={publicBaseUrl} />
         )}
 
