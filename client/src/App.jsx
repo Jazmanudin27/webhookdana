@@ -21,6 +21,7 @@ import {
   Lock,
   LogOut,
   User,
+  Users,
   ShieldAlert,
   Gauge
 } from 'lucide-react';
@@ -33,6 +34,7 @@ import HardwareConfigGuide from './components/HardwareConfigGuide';
 import WifiSettingsCard from './components/WifiSettingsCard';
 import PackageManagerCard from './components/PackageManagerCard';
 import FleetManagementCard from './components/FleetManagementCard';
+import UserManagementCard from './components/UserManagementCard';
 import LoginModal from './components/LoginModal';
 
 export default function App() {
@@ -357,6 +359,7 @@ export default function App() {
   const allTabs = [
     { id: 'dashboard', label: isClient ? 'Monitor Cabang Saya' : 'Monitor & Kiosk', icon: Droplet, visible: true },
     { id: 'fleet', label: 'Armada & Multi-Cabang', icon: Server, visible: isSuperAdmin },
+    { id: 'users', label: 'Manajemen Pengguna', icon: Users, visible: isSuperAdmin },
     { id: 'packages', label: 'Paket Air & Harga', icon: Layers, visible: Boolean(currentUser) },
     { id: 'wifi', label: 'Pengaturan WiFi ESP32', icon: Wifi, visible: Boolean(currentUser) },
     { id: 'inspector', label: 'Webhook & Live Log', icon: Terminal, visible: isSuperAdmin },
@@ -682,7 +685,15 @@ export default function App() {
           />
         )}
 
-        {/* Tab 3: Packages */}
+        {/* Tab 3: Users Management (Only Super Admin) */}
+        {activeTab === 'users' && isSuperAdmin && (
+          <UserManagementCard
+            authToken={authToken}
+            machines={machines}
+          />
+        )}
+
+        {/* Tab 4: Packages */}
         {activeTab === 'packages' && currentUser && (
           <PackageManagerCard onPackagesChanged={() => {}} />
         )}
