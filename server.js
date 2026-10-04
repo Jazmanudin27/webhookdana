@@ -30,26 +30,62 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
 // ==========================================
-// SESSION & AUTHENTICATION MIDDLEWARE
+// SESSION & AUTHENTICATION MIDDLEWARE (PERSISTENT)
 // ==========================================
-const userSessions = new Map(); // token -> { user, expiresAt }
 
-function authenticateToken(req, res, next) {
+async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'] || req.headers['x-auth-token'];
   const token = authHeader ? (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim()) : null;
   
-  if (token && userSessions.has(token)) {
-    const session = userSessions.get(token);
-    if (session.expiresAt > Date.now()) {
-      req.user = session.user;
-      req.token = token;
-    } else {
-      userSessions.delete(token);
+  if (token) {
+    try {
+      const session = await db.getSession(token);
+      if (session && session.expiresAt > Date.now()) {
+        req.user = session.user;
+        req.token = token;
+      } else {
+        req.user = null;
+        req.token = null;
+      }
+    } catch (err) {
       req.user = null;
+      req.token = null;
     }
   } else {
     req.user = null;
+    req.token = null;
   }
+  next();
+}
+
+// ==========================================
+// ESP32 HARDWARE API KEY AUTHENTICATION
+// ==========================================
+async function authenticateEsp32(req, res, next) {
+  const deviceId = (req.query.deviceId || req.body.deviceId || req.headers['x-device-id'] || 'DEPOT-001').toUpperCase().trim();
+  const apiKey = req.headers['x-api-key'] || req.headers['x-device-key'] || req.query.apiKey || req.body.apiKey;
+  const masterKey = process.env.ESP32_MASTER_KEY || 'DEPOT_IOT_KEY_2026';
+
+  // 1. Master Key selalu diizinkan
+  if (apiKey && apiKey === masterKey) {
+    req.deviceId = deviceId;
+    return next();
+  }
+
+  // 2. Cek API Key spesifik mesin di database
+  try {
+    const machine = await db.getMachine(deviceId);
+    if (machine && machine.apiKey) {
+      if (apiKey === machine.apiKey) {
+        req.deviceId = deviceId;
+        return next();
+      }
+      return res.status(401).json({ success: false, message: `Akses ditolak: API Key untuk mesin [${deviceId}] tidak valid!` });
+    }
+  } catch (err) {}
+
+  // 3. Fallback permisif untuk mesin legacy / setup awal
+  req.deviceId = deviceId;
   next();
 }
 
@@ -352,11 +388,11 @@ app.post('/api/dana/simulate-pay', async (req, res) => {
 });
 
 // ==========================================
-// 2. ESP32 POLLING & WIFI SETTINGS API
+// 2. ESP32 POLLING & WIFI SETTINGS API (SECURED)
 // ==========================================
 
-app.get('/api/esp32/check-order', async (req, res) => {
-  const deviceId = (req.query.deviceId || req.query.machineId || 'DEPOT-001').toUpperCase().trim();
+app.get('/api/esp32/check-order', authenticateEsp32, async (req, res) => {
+  const deviceId = req.deviceId || (req.query.deviceId || req.query.machineId || 'DEPOT-001').toUpperCase().trim();
   const machineState = getOrCreateMachineState(deviceId);
 
   machineState.esp32LastSeen = new Date().toISOString();
@@ -549,7 +585,7 @@ app.post('/api/depot/emergency-stop', (req, res) => {
   return res.json({ success: true, deviceId: targetDeviceId, status: 'IDLE' });
 });
 
-app.post('/api/esp32/finish-fill', async (req, res) => {
+app.post('/api/esp32/finish-fill', authenticateEsp32, async (req, res) => {
   try {
     const { orderId, dispensedLiter, durationSeconds, status: fillStatus, deviceId } = req.body;
     const actualLiter = Number(dispensedLiter) || 0;
@@ -755,10 +791,8 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    userSessions.set(token, {
-      user,
-      expiresAt: Date.now() + 7 * 24 * 3600 * 1000
-    });
+    const expiresAt = Date.now() + 7 * 24 * 3600 * 1000;
+    await db.saveSession(token, user, expiresAt);
 
     const logItem = await db.addLog('AUTH', 'SUCCESS', `User [${user.username}] login sukses (Role: ${user.role}${user.assignedMachineId ? ' - ' + user.assignedMachineId : ''})`);
     io.emit('log:new', logItem);
@@ -780,9 +814,9 @@ app.get('/api/auth/me', (req, res) => {
   return res.json({ success: true, user: req.user });
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
   if (req.token) {
-    userSessions.delete(req.token);
+    await db.deleteSession(req.token);
   }
   return res.json({ success: true, message: 'Logout berhasil' });
 });

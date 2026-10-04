@@ -36,6 +36,7 @@ Preferences preferences;
 // ==========================================================
 // ID Unik Mesin Depot (Bisa diubah lewat Hotspot HP di lapangan atau default di sini)
 String DEVICE_ID = "DEPOT-001";
+const char* DEVICE_API_KEY = "DEPOT_IOT_KEY_2026"; // API Key Keamanan ESP32 ke Cloud
 
 String wifi_ssid     = "Jihan";        // SSID WiFi Router
 String wifi_password = "Tasikmalaya";  // Password WiFi Router
@@ -652,6 +653,8 @@ void sendFinishReport(const FinishMsg& msg) {
 
     if (http.begin(client, urlFinishFill)) {
         http.addHeader("Content-Type", "application/json");
+        http.addHeader("X-Device-Key", DEVICE_API_KEY);
+        http.addHeader("X-Device-Id", msg.deviceId);
 
         StaticJsonDocument<256> doc;
         doc["deviceId"]       = msg.deviceId;
@@ -716,6 +719,9 @@ void pollServer() {
         consecutivePollFailures++;
         return;
     }
+
+    http.addHeader("X-Device-Key", DEVICE_API_KEY);
+    http.addHeader("X-Device-Id", devId);
 
     int httpCode = http.GET();
 

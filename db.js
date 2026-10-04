@@ -1,6 +1,7 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -12,6 +13,7 @@ const PACKAGES_FILE = path.join(DATA_DIR, 'packages.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const MACHINES_FILE = path.join(DATA_DIR, 'machines.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
 // Default initial data
 const DEFAULT_PACKAGES = [
@@ -72,6 +74,7 @@ let memTransactions = [];
 let memLogs = [];
 let memMachines = [...DEFAULT_MACHINES];
 let memUsers = [...DEFAULT_USERS];
+let memSessions = {};
 let memSettings = {
   wifi_ssid: 'WiFi_Depot_Air',
   wifi_password: '',
@@ -86,6 +89,7 @@ try {
   if (fs.existsSync(SETTINGS_FILE)) memSettings = { ...memSettings, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
   if (fs.existsSync(MACHINES_FILE)) memMachines = JSON.parse(fs.readFileSync(MACHINES_FILE, 'utf8'));
   if (fs.existsSync(USERS_FILE)) memUsers = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  if (fs.existsSync(SESSIONS_FILE)) memSessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
 } catch (e) {}
 
 async function initDB() {
@@ -163,6 +167,7 @@ async function initDB() {
           name VARCHAR(100) NOT NULL,
           location VARCHAR(255) DEFAULT '',
           status VARCHAR(50) DEFAULT 'OFFLINE',
+          api_key VARCHAR(100) DEFAULT NULL,
           total_liters DECIMAL(10,2) DEFAULT 0,
           total_revenue INT DEFAULT 0,
           filter_limit_liters INT DEFAULT 10000,
@@ -173,6 +178,22 @@ async function initDB() {
           is_active TINYINT(1) DEFAULT 1,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+
+      // Migration: Add api_key column if not present
+      try {
+        await pool.query('ALTER TABLE depot_machines ADD COLUMN api_key VARCHAR(100) DEFAULT NULL');
+      } catch (e) {}
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS user_sessions (
+          token VARCHAR(128) PRIMARY KEY,
+          user_id INT NOT NULL,
+          user_data JSON,
+          expires_at BIGINT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_expires (expires_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
@@ -211,25 +232,27 @@ async function initDB() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
       `);
 
-      // Seed user awal jika masih kosong
+      // Seed user awal jika masih kosong (Gunakan bcrypt hash langsung)
       const [uRows] = await pool.query('SELECT COUNT(*) as count FROM users');
       if (uRows[0].count === 0) {
+        const hashAdmin = await bcrypt.hash('admin123', 10);
+        const hashMitra = await bcrypt.hash('123456', 10);
         await pool.query(
           'INSERT INTO users (username, password, name, role, assigned_machine_id, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)',
           [
-            'admin', 'admin123', 'Administrator Pusat', 'ADMIN', null, '08123456789', 1,
-            'mitra1', '123456', 'Mitra Cabang 1', 'CLIENT', 'DEPOT-001', '08987654321', 1
+            'admin', hashAdmin, 'Administrator Pusat', 'ADMIN', null, '08123456789', 1,
+            'mitra1', hashMitra, 'Mitra Cabang 1', 'CLIENT', 'DEPOT-001', '08987654321', 1
           ]
         );
-        console.log('🌱 Seed default users: admin (Superadmin) dan mitra1 (Client Cabang 1)');
+        console.log('🌱 Seed default users dengan bcrypt hash: admin dan mitra1');
       }
 
       // Seed mesin awal jika masih kosong
       const [machRows] = await pool.query('SELECT COUNT(*) as count FROM depot_machines');
       if (machRows[0].count === 0) {
         await pool.query(
-          'INSERT INTO depot_machines (id, name, location, status, filter_limit_liters) VALUES (?, ?, ?, ?, ?)',
-          ['DEPOT-001', 'Depot Pusat (Prototipe)', 'Kantor Pusat / Workshop', 'ONLINE', 10000]
+          'INSERT INTO depot_machines (id, name, location, status, api_key, filter_limit_liters) VALUES (?, ?, ?, ?, ?, ?)',
+          ['DEPOT-001', 'Depot Pusat (Prototipe)', 'Kantor Pusat / Workshop', 'ONLINE', 'DEPOT_IOT_KEY_2026', 10000]
         );
       }
 
@@ -868,10 +891,46 @@ async function getUserByUsername(username) {
   return memUsers.find(u => u.username.toLowerCase() === username.toLowerCase()) || null;
 }
 
+async function saveUserPasswordHash(id, hash) {
+  if (isMySqlConnected) {
+    try {
+      await pool.query('UPDATE users SET password = ? WHERE id = ?', [hash, id]);
+    } catch (e) {
+      console.error('MySQL saveUserPasswordHash error:', e.message);
+    }
+  }
+  const idx = memUsers.findIndex(u => u.id === Number(id));
+  if (idx !== -1) {
+    memUsers[idx].password = hash;
+    try { fs.writeFileSync(USERS_FILE, JSON.stringify(memUsers, null, 2)); } catch (e) {}
+  }
+}
+
 async function validateUser(username, password) {
   const user = await getUserByUsername(username);
   if (!user) return null;
-  if (user.password === password) {
+
+  let isValid = false;
+  const isHash = user.password && (user.password.startsWith('$2a$') || user.password.startsWith('$2b$'));
+
+  if (isHash) {
+    isValid = await bcrypt.compare(password, user.password);
+  } else {
+    // Legacy plain text match
+    isValid = (user.password === password);
+    if (isValid) {
+      // Auto-upgrade legacy plain text password to secure bcrypt hash
+      try {
+        const newHash = await bcrypt.hash(password, 10);
+        await saveUserPasswordHash(user.id, newHash);
+        console.log(`🔐 Password user [${user.username}] berhasil di-upgrade otomatis ke bcrypt hash.`);
+      } catch (err) {
+        console.error('Failed to auto-upgrade password to hash:', err.message);
+      }
+    }
+  }
+
+  if (isValid) {
     const { password: _, ...safeUser } = user;
     return safeUser;
   }
@@ -883,13 +942,18 @@ async function saveUser(userData) {
   const cleanRole = role === 'ADMIN' ? 'ADMIN' : 'CLIENT';
   const cleanMachine = cleanRole === 'ADMIN' ? null : (assignedMachineId || null);
 
+  let hashedPassword = password;
+  if (password && !password.startsWith('$2a$') && !password.startsWith('$2b$')) {
+    hashedPassword = await bcrypt.hash(password, 10);
+  }
+
   if (isMySqlConnected) {
     try {
       if (id) {
-        if (password) {
+        if (hashedPassword) {
           await pool.query(
             'UPDATE users SET username=?, password=?, name=?, role=?, assigned_machine_id=?, phone=? WHERE id=?',
-            [username, password, name, cleanRole, cleanMachine, phone || '', id]
+            [username, hashedPassword, name, cleanRole, cleanMachine, phone || '', id]
           );
         } else {
           await pool.query(
@@ -901,7 +965,7 @@ async function saveUser(userData) {
       } else {
         const [res] = await pool.query(
           'INSERT INTO users (username, password, name, role, assigned_machine_id, phone, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)',
-          [username, password, name, cleanRole, cleanMachine, phone || '']
+          [username, hashedPassword || await bcrypt.hash('123456', 10), name, cleanRole, cleanMachine, phone || '']
         );
         return { id: res.insertId, username, name, role: cleanRole, assignedMachineId: cleanMachine, phone };
       }
@@ -921,7 +985,7 @@ async function saveUser(userData) {
         role: cleanRole, 
         assignedMachineId: cleanMachine, 
         phone: phone || '',
-        ...(password ? { password } : {})
+        ...(hashedPassword ? { password: hashedPassword } : {})
       };
     }
   } else {
@@ -929,7 +993,7 @@ async function saveUser(userData) {
     memUsers.push({
       id: newId,
       username,
-      password: password || '123456',
+      password: hashedPassword || await bcrypt.hash('123456', 10),
       name,
       role: cleanRole,
       assignedMachineId: cleanMachine,
@@ -940,6 +1004,68 @@ async function saveUser(userData) {
   }
   try { fs.writeFileSync(USERS_FILE, JSON.stringify(memUsers, null, 2)); } catch (e) {}
   return userData;
+}
+
+// ==========================================
+// PERSISTENT SESSIONS (DATABASE / JSON)
+// ==========================================
+
+async function saveSession(token, user, expiresAt) {
+  if (isMySqlConnected) {
+    try {
+      await pool.query(
+        'REPLACE INTO user_sessions (token, user_id, user_data, expires_at) VALUES (?, ?, ?, ?)',
+        [token, user.id, JSON.stringify(user), expiresAt]
+      );
+      return true;
+    } catch (e) {
+      console.error('MySQL saveSession error:', e.message);
+    }
+  }
+  memSessions[token] = { user, expiresAt };
+  try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(memSessions, null, 2)); } catch (e) {}
+  return true;
+}
+
+async function getSession(token) {
+  if (!token) return null;
+  if (isMySqlConnected) {
+    try {
+      const [rows] = await pool.query('SELECT * FROM user_sessions WHERE token = ? LIMIT 1', [token]);
+      if (rows.length > 0) {
+        const r = rows[0];
+        if (Number(r.expires_at) > Date.now()) {
+          const user = typeof r.user_data === 'string' ? JSON.parse(r.user_data) : r.user_data;
+          return { user, expiresAt: Number(r.expires_at) };
+        } else {
+          await deleteSession(token);
+          return null;
+        }
+      }
+    } catch (e) {
+      console.error('MySQL getSession error:', e.message);
+    }
+  }
+  const session = memSessions[token];
+  if (session && session.expiresAt > Date.now()) {
+    return session;
+  }
+  if (session) {
+    delete memSessions[token];
+    try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(memSessions, null, 2)); } catch (e) {}
+  }
+  return null;
+}
+
+async function deleteSession(token) {
+  if (!token) return;
+  if (isMySqlConnected) {
+    try {
+      await pool.query('DELETE FROM user_sessions WHERE token = ?', [token]);
+    } catch (e) {}
+  }
+  delete memSessions[token];
+  try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(memSessions, null, 2)); } catch (e) {}
 }
 
 async function deleteUser(id) {
@@ -984,5 +1110,8 @@ module.exports = {
   getUserByUsername,
   validateUser,
   saveUser,
-  deleteUser
+  deleteUser,
+  saveSession,
+  getSession,
+  deleteSession
 };
