@@ -364,14 +364,18 @@ export default function App() {
   ].filter(t => t.visible);
 
   return (
-    <div className={`h-screen max-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black relative overflow-hidden font-sans ${currentUser ? 'min-h-screen h-auto overflow-y-auto pb-12' : ''}`}>
+    <div className={`bg-slate-950 text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black relative font-sans ${
+      currentUser 
+        ? 'min-h-screen h-auto overflow-y-auto overflow-x-hidden pb-16' 
+        : 'h-screen max-h-screen overflow-hidden'
+    }`}>
       
       {/* Dynamic Ambient Blur Mesh */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[250px] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute top-1/3 right-10 w-[400px] h-[250px] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
 
       {/* Top Header (Slim & Compact) */}
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-2xl shrink-0 z-50">
+      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-2xl shrink-0 z-50 sticky top-0">
         <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between ${currentUser ? 'h-14 py-2' : 'h-12 py-1.5'}`}>
           
           {/* Brand Logo */}
@@ -474,90 +478,94 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className={`flex-1 w-full relative z-10 flex flex-col overflow-hidden ${currentUser ? 'max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-6 space-y-6 overflow-y-auto' : 'px-2 sm:px-4 py-2 h-full'}`}>
+      <main className={`w-full relative z-10 flex flex-col ${
+        currentUser 
+          ? 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 space-y-6 flex-1' 
+          : 'flex-1 overflow-hidden px-2 sm:px-4 py-2 h-full'
+      }`}>
         
         {/* Top Summary Stats Cards (Hanya muncul jika sudah Login sebagai Admin / Mitra) */}
         {currentUser && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-fadeIn">
             
             {/* Card 1: Today Revenue */}
-            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-emerald-500/40 transition-all">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-xs font-bold uppercase tracking-wider">
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/30 relative overflow-hidden group hover:border-emerald-500/60 shadow-xl transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
                   {isClient ? 'Omset Cabang Hari Ini' : 'Pendapatan Hari Ini'}
                 </span>
-                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 shadow-sm shadow-emerald-500/20">
                   <DollarSign className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
+              <div className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight">
                 Rp {(systemState.totalRevenueToday || 0).toLocaleString('id-ID')}
               </div>
-              <div className="text-[11px] text-emerald-400 font-semibold mt-1 flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" /> Transaksi DANA Sukses
+              <div className="text-xs text-emerald-400 font-semibold mt-2 flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5" /> Transaksi DANA Sukses
               </div>
             </div>
 
             {/* Card 2: Liters Dispensed */}
-            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-cyan-500/40 transition-all">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-xs font-bold uppercase tracking-wider">
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-900 border border-cyan-500/30 relative overflow-hidden group hover:border-cyan-500/60 shadow-xl transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-cyan-400">
                   {isClient ? 'Air Terdistribusi Cabang' : 'Air Terdistribusi'}
                 </span>
-                <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 shadow-sm shadow-cyan-500/20">
                   <Droplet className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-xl sm:text-2xl font-black text-cyan-300 font-mono tracking-tight">
+              <div className="text-2xl sm:text-3xl font-black text-cyan-300 font-mono tracking-tight">
                 {(systemState.totalWaterDispensedToday || 0).toFixed(1)} <span className="text-sm font-normal text-slate-400">Liter</span>
               </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-1">
-                Flow Sensor YF-S201 GPIO 34
+              <div className="text-xs text-slate-400 font-medium mt-2 flex items-center gap-1.5">
+                <Gauge className="w-3.5 h-3.5 text-cyan-400" /> Flow Sensor YF-S201
               </div>
             </div>
 
             {/* Card 3: Total Orders */}
-            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-purple-500/40 transition-all">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-xs font-bold uppercase tracking-wider">Total Pesanan</span>
-                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-purple-950/40 via-slate-900 to-slate-900 border border-purple-500/30 relative overflow-hidden group hover:border-purple-500/60 shadow-xl transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-purple-400">Total Pesanan</span>
+                <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400 shadow-sm shadow-purple-500/20">
                   <Layers className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-xl sm:text-2xl font-black text-purple-300 font-mono tracking-tight">
+              <div className="text-2xl sm:text-3xl font-black text-purple-300 font-mono tracking-tight">
                 {transactions.length} <span className="text-sm font-normal text-slate-400">Pesanan</span>
               </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-1">
+              <div className="text-xs text-slate-400 font-medium mt-2">
                 {transactions.filter(t => t.status === 'COMPLETED').length} sukses terisi penuh
               </div>
             </div>
 
             {/* Card 4: Webhook Domain or Filter Life */}
-            <div className="glass-card p-4 sm:p-5 rounded-3xl border border-slate-800 relative overflow-hidden group hover:border-blue-500/40 transition-all">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-xs font-bold uppercase tracking-wider">
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-blue-950/40 via-slate-900 to-slate-900 border border-blue-500/30 relative overflow-hidden group hover:border-blue-500/60 shadow-xl transition-all">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-blue-400">
                   {isClient ? 'Kesehatan Filter Air' : 'Total Cabang Armada'}
                 </span>
-                <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400 shadow-sm shadow-blue-500/20">
                   <Server className="w-4 h-4" />
                 </div>
               </div>
               {isClient ? (
                 <>
-                  <div className="text-xl sm:text-2xl font-black text-white font-mono">
+                  <div className="text-2xl sm:text-3xl font-black text-white font-mono">
                     {Math.round(((selectedMachine?.filterUsedLiters || 0) / (selectedMachine?.filterLimitLiters || 10000)) * 100)}%
                     <span className="text-sm font-normal text-slate-400"> Terpakai</span>
                   </div>
-                  <div className="text-[11px] text-emerald-400 mt-1 font-mono">
+                  <div className="text-xs text-emerald-400 mt-2 font-mono">
                     {(selectedMachine?.filterUsedLiters || 0).toFixed(0)} / {(selectedMachine?.filterLimitLiters || 10000).toLocaleString('id-ID')} Liter
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="text-xl sm:text-2xl font-black text-white font-mono">
+                  <div className="text-2xl sm:text-3xl font-black text-white font-mono">
                     {machines.length || 1} <span className="text-sm font-normal text-slate-400">Cabang</span>
                   </div>
-                  <div className="text-[11px] text-cyan-400 mt-1 font-mono truncate">
+                  <div className="text-xs text-cyan-400 mt-2 font-mono truncate">
                     {machines.filter(m => m.esp32Status === 'ONLINE').length} Mesin Online Terhubung
                   </div>
                 </>
@@ -568,7 +576,7 @@ export default function App() {
 
         {/* Navigation Tabs Pill Bar (Hanya muncul jika sudah Login) */}
         {currentUser && (
-          <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto animate-fadeIn">
+          <div className="bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800/80 backdrop-blur-xl flex items-center gap-1.5 overflow-x-auto shadow-xl">
             {allTabs.map(tab => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -576,16 +584,16 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
                     isActive
-                      ? 'bg-gradient-to-r from-[#118EEA] to-cyan-500 text-white shadow-xl shadow-blue-500/25 scale-[1.02]'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                      ? 'bg-gradient-to-r from-blue-600 via-[#118EEA] to-cyan-500 text-white shadow-lg shadow-blue-500/30 scale-[1.01]'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
                   <span>{tab.label}</span>
                   {tab.id === 'fleet' && machines.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-900 text-cyan-300 font-mono">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-950 text-cyan-300 font-mono border border-slate-800">
                       {machines.length}
                     </span>
                   )}
@@ -595,11 +603,13 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 1: Dashboard (Monitor & Kiosk Full Screen) */}
+        {/* Tab 1: Dashboard (Monitor & Kiosk) */}
         {activeTab === 'dashboard' && (
-          <div className={`w-full transition-all duration-500 ${currentUser ? '' : 'h-full flex-1 flex flex-col min-h-0'}`}>
-            {hasActiveTransaction ? (
-              <div className={`w-full animate-fadeIn ${currentUser ? '' : 'h-full flex-1 flex flex-col min-h-0'}`}>
+          <div className={`w-full transition-all duration-500 ${currentUser ? 'space-y-6' : 'h-full flex-1 flex flex-col min-h-0'}`}>
+            {currentUser ? (
+              /* ADMIN DASHBOARD VIEW: Control Center & Kiosk Tester */
+              <div className="space-y-6 animate-fadeIn">
+                {/* 1. Live Dispenser & Hardware HUD */}
                 <WaterDispenserVisualizer
                   systemState={systemState}
                   telemetry={telemetry}
@@ -607,18 +617,52 @@ export default function App() {
                   selectedMachineId={selectedMachineId}
                   selectedMachine={selectedMachine}
                 />
+
+                {/* 2. Admin Kiosk Test Simulator */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-cyan-400" />
+                      Simulasi Kiosk Pelanggan (Admin Test Sandbox)
+                    </h3>
+                    <span className="text-xs text-slate-500 hidden sm:inline">
+                      Uji coba alur QRIS DANA & aktivasi pengisian air
+                    </span>
+                  </div>
+                  <OrderSimulator
+                    onOrderCreated={(order) => setActivePendingOrder(order)}
+                    onSimulatePayment={handleSimulatePayment}
+                    activePendingOrder={activePendingOrder}
+                    systemState={systemState}
+                    selectedMachineId={selectedMachineId}
+                    selectedMachine={selectedMachine}
+                  />
+                </div>
               </div>
             ) : (
-              <div className={`w-full animate-fadeIn ${currentUser ? '' : 'h-full flex-1 flex flex-col min-h-0'}`}>
-                <OrderSimulator
-                  onOrderCreated={(order) => setActivePendingOrder(order)}
-                  onSimulatePayment={handleSimulatePayment}
-                  activePendingOrder={activePendingOrder}
-                  systemState={systemState}
-                  selectedMachineId={selectedMachineId}
-                  selectedMachine={selectedMachine}
-                />
-              </div>
+              /* CUSTOMER VIEW: 100vh Edge-to-Edge Kiosk */
+              hasActiveTransaction ? (
+                <div className="w-full animate-fadeIn h-full flex-1 flex flex-col min-h-0">
+                  <WaterDispenserVisualizer
+                    systemState={systemState}
+                    telemetry={telemetry}
+                    onEmergencyStop={handleEmergencyStop}
+                    selectedMachineId={selectedMachineId}
+                    selectedMachine={selectedMachine}
+                  />
+                </div>
+              ) : (
+                <div className="w-full animate-fadeIn h-full flex-1 flex flex-col min-h-0">
+                  <OrderSimulator
+                    onOrderCreated={(order) => setActivePendingOrder(order)}
+                    onSimulatePayment={handleSimulatePayment}
+                    activePendingOrder={activePendingOrder}
+                    systemState={systemState}
+                    selectedMachineId={selectedMachineId}
+                    selectedMachine={selectedMachine}
+                  />
+                </div>
+              )
             )}
           </div>
         )}
