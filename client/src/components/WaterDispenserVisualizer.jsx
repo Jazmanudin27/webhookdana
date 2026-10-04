@@ -78,7 +78,7 @@ export default function WaterDispenserVisualizer({
   }, []);
 
   return (
-    <div className={`rounded-2xl p-3 sm:p-4 relative overflow-hidden transition-all duration-500 ${
+    <div className={`rounded-2xl p-4 sm:p-5 relative overflow-hidden transition-all duration-500 w-full h-full flex-1 flex flex-col justify-between ${
       isFilling 
         ? 'glass-card-glow border-cyan-500/40 shadow-xl shadow-cyan-950/50' 
         : isPaid 
@@ -94,7 +94,7 @@ export default function WaterDispenserVisualizer({
       }`} />
 
       {/* Header Bar */}
-      <div className="flex items-center justify-between gap-3 mb-2.5 pb-2 border-b border-slate-800/80 relative z-10">
+      <div className="flex items-center justify-between gap-3 mb-2.5 pb-2 border-b border-slate-800/80 relative z-10 shrink-0">
         <div className="flex items-center gap-2.5">
           <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-500 shrink-0 ${
             isFilling 
@@ -140,7 +140,7 @@ export default function WaterDispenserVisualizer({
       </div>
 
       {/* Main Interactive Visualizer Body */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center relative z-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center relative z-10 flex-1 h-full min-h-0">
         
         {/* Left Column: 3D High-Tech Water Galon Cylinder */}
         <div className="lg:col-span-5 flex flex-col items-center justify-center">

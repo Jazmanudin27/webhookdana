@@ -474,7 +474,7 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className={`max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex-1 w-full relative z-10 flex flex-col justify-center overflow-hidden ${currentUser ? 'mt-6 space-y-6 overflow-y-auto' : 'py-1 sm:py-2'}`}>
+      <main className={`flex-1 w-full relative z-10 flex flex-col overflow-hidden ${currentUser ? 'max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mt-6 space-y-6 overflow-y-auto' : 'px-2 sm:px-4 py-2 h-full'}`}>
         
         {/* Top Summary Stats Cards (Hanya muncul jika sudah Login sebagai Admin / Mitra) */}
         {currentUser && (
@@ -597,9 +597,9 @@ export default function App() {
 
         {/* Tab 1: Dashboard (Monitor & Kiosk Full Screen) */}
         {activeTab === 'dashboard' && (
-          <div className="w-full transition-all duration-500">
+          <div className={`w-full transition-all duration-500 ${currentUser ? '' : 'h-full flex-1 flex flex-col min-h-0'}`}>
             {hasActiveTransaction ? (
-              <div className="w-full animate-fadeIn">
+              <div className={`w-full animate-fadeIn ${currentUser ? '' : 'h-full flex-1 flex flex-col min-h-0'}`}>
                 <WaterDispenserVisualizer
                   systemState={systemState}
                   telemetry={telemetry}
@@ -609,7 +609,7 @@ export default function App() {
                 />
               </div>
             ) : (
-              <div className="w-full animate-fadeIn">
+              <div className={`w-full animate-fadeIn ${currentUser ? '' : 'h-full flex-1 flex flex-col min-h-0'}`}>
                 <OrderSimulator
                   onOrderCreated={(order) => setActivePendingOrder(order)}
                   onSimulatePayment={handleSimulatePayment}
