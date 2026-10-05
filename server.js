@@ -5,6 +5,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
 require('dotenv').config();
 
 const db = require('./db');
@@ -106,7 +107,53 @@ function requireAdmin(req, res, next) {
 app.use(authenticateToken);
 
 // ==========================================
-// MULTI-MACHINE (FLEET) IN-MEMORY STATE
+// DANA SNAP PRODUCTION SIGNATURE VERIFICATION
+// ==========================================
+function verifyDanaSignature(req) {
+  const verifyEnv = (process.env.DANA_VERIFY_SIGNATURE || 'false').toLowerCase() === 'true';
+  if (!verifyEnv) return { valid: true, reason: 'SANDBOX_BYPASS' };
+
+  const signature = req.headers['x-signature'] || req.headers['X-SIGNATURE'];
+  const timestamp = req.headers['x-timestamp'] || req.headers['X-TIMESTAMP'];
+  const clientKey = req.headers['x-client-key'] || req.headers['X-CLIENT-KEY'];
+
+  if (!signature) {
+    return { valid: false, reason: 'MISSING_X_SIGNATURE_HEADER' };
+  }
+
+  const clientSecret = process.env.DANA_CLIENT_SECRET || '';
+  const publicKeyPem = process.env.DANA_PUBLIC_KEY || '';
+
+  const minifiedBody = JSON.stringify(req.body || {});
+  const sha256Body = crypto.createHash('sha256').update(minifiedBody).digest('hex').toLowerCase();
+  const stringToSign = `${req.method}|/api/dana/finish-notify|${sha256Body}|${timestamp || ''}`;
+
+  if (publicKeyPem) {
+    try {
+      const verifier = crypto.createVerify('RSA-SHA256');
+      verifier.update(stringToSign);
+      const isValid = verifier.verify(publicKeyPem, signature, 'base64');
+      return { valid: isValid, reason: isValid ? 'RSA_VERIFIED' : 'INVALID_RSA_SIGNATURE' };
+    } catch (e) {
+      return { valid: false, reason: 'RSA_VERIFY_ERROR: ' + e.message };
+    }
+  }
+
+  if (clientSecret) {
+    try {
+      const expectedHmac = crypto.createHmac('sha256', clientSecret).update(stringToSign).digest('base64');
+      const isValid = (expectedHmac === signature);
+      return { valid: isValid, reason: isValid ? 'HMAC_VERIFIED' : 'INVALID_HMAC_SIGNATURE' };
+    } catch (e) {
+      return { valid: false, reason: 'HMAC_VERIFY_ERROR: ' + e.message };
+    }
+  }
+
+  return { valid: true, reason: 'NO_KEY_CONFIGURED_PASSTHROUGH' };
+}
+
+// ==========================================
+// MULTI-MACHINE (FLEET) & MULTI-NOZZLE STATE
 // ==========================================
 const machinesState = {};
 
@@ -118,6 +165,11 @@ function getOrCreateMachineState(machineId = 'DEPOT-001') {
       status: 'IDLE', // 'IDLE' | 'PAID' | 'FILLING' | 'PAUSED' | 'EMERGENCY_STOP'
       activeOrder: null,
       pendingCommand: null, // 'START' | 'PAUSE' | 'STOP'
+      nozzlesCount: 2, // Default 2 kran per mesin (Multi-Nozzle)
+      nozzles: {
+        1: { nozzleId: 1, status: 'IDLE', activeOrder: null, currentLiter: 0, flowRate: 0, pendingCommand: null },
+        2: { nozzleId: 2, status: 'IDLE', activeOrder: null, currentLiter: 0, flowRate: 0, pendingCommand: null }
+      },
       esp32LastSeen: null,
       esp32Ip: null,
       esp32Status: 'OFFLINE',
@@ -169,14 +221,31 @@ setInterval(async () => {
 // 1. DANA SANDBOX WEBHOOK & ORDER ENDPOINTS
 // ==========================================
 
-// ==========================================
-// 1. DANA SANDBOX WEBHOOK & ORDER ENDPOINTS
-// ==========================================
+// SNAP B2B OAuth 2.0 Token Endpoint (DANA / Bank Indonesia Standard)
+app.post(['/api/dana/oauth/token', '/api/v1.0/access-token/b2b'], (req, res) => {
+  const grantType = req.body.grantType || req.body.grant_type || 'client_credentials';
+  const clientId = req.headers['x-client-key'] || req.body.clientId || process.env.DANA_CLIENT_ID;
+
+  const accessToken = 'DANA-SNAP-TOKEN-' + crypto.randomBytes(16).toString('hex');
+  
+  return res.status(200).json({
+    responseCode: '2007300',
+    responseMessage: 'Successful',
+    accessToken,
+    tokenType: 'Bearer',
+    expiresIn: '900',
+    additionalInfo: {
+      merchantId: process.env.DANA_MERCHANT_ID || '216620090027052450515',
+      environment: process.env.DANA_ENVIRONMENT || 'SANDBOX'
+    }
+  });
+});
 
 app.post('/api/dana/create-order', async (req, res) => {
   try {
-    const { packageId, customLiter, customerName, deviceId } = req.body;
+    const { packageId, customLiter, customerName, deviceId, nozzleId } = req.body;
     const targetDeviceId = (deviceId || 'DEPOT-001').toUpperCase().trim();
+    const targetNozzleId = Number(nozzleId) || 1;
     
     let targetLiter = 19;
     let amount = 7000;
@@ -201,6 +270,7 @@ app.post('/api/dana/create-order', async (req, res) => {
       orderId,
       merchantTransId: orderId,
       deviceId: targetDeviceId,
+      nozzleId: targetNozzleId,
       customerName: customerName || 'Pelanggan Depot Air',
       title,
       targetLiter,
@@ -212,12 +282,12 @@ app.post('/api/dana/create-order', async (req, res) => {
       completedAt: null,
       dispensedLiter: 0,
       qrString: `00020101021226670016ID.DANA.WWW01189360000000000000000215${orderId}520454115303360540${amount}.005802ID5914DEPOT AIR DANA6007JAKARTA6304ABCD`,
-      checkoutUrl: `${PUBLIC_BASE_URL}/checkout/${orderId}?machine=${targetDeviceId}`
+      checkoutUrl: `${PUBLIC_BASE_URL}/checkout/${orderId}?machine=${targetDeviceId}&nozzle=${targetNozzleId}`
     };
 
     await db.saveTransaction(newOrder);
 
-    const logItem = await db.addLog('DASHBOARD', 'INFO', `Order baru dibuat [Cabang ${targetDeviceId}]: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
+    const logItem = await db.addLog('DASHBOARD', 'INFO', `Order baru dibuat [Cabang ${targetDeviceId} | Kran #${targetNozzleId}]: ${orderId} (${title} - Rp ${amount.toLocaleString('id-ID')})`, newOrder);
     io.emit('log:new', logItem);
     io.emit('order:created', newOrder);
 
@@ -233,6 +303,19 @@ app.post('/api/dana/create-order', async (req, res) => {
 
 app.post('/api/dana/finish-notify', async (req, res) => {
   try {
+    // 1. Verifikasi Signature DANA Snap / OpenAPI
+    const sigCheck = verifyDanaSignature(req);
+    if (!sigCheck.valid) {
+      const errLog = await db.addLog('DANA_WEBHOOK', 'ERROR', `Webhook ditolak! Signature DANA tidak valid [Reason: ${sigCheck.reason}]`, req.headers);
+      io.emit('log:new', errLog);
+      return res.status(401).json({
+        response: {
+          head: { version: '2.0', respTime: new Date().toISOString() },
+          body: { resultInfo: { resultStatus: 'F', resultCode: 'UNAUTHORIZED_SIGNATURE', resultMsg: `Signature verification failed: ${sigCheck.reason}` } }
+        }
+      });
+    }
+
     const rawBody = req.body;
     let merchantTransId = null;
     let acquirementId = null;
@@ -249,7 +332,7 @@ app.post('/api/dana/finish-notify', async (req, res) => {
       amountVal = rawBody.amount || rawBody.totalAmount;
     }
 
-    const logItem = await db.addLog('DANA_WEBHOOK', 'SUCCESS', `Webhook Finish-Notify diterima untuk Order: ${merchantTransId || 'Unknown'}`, rawBody);
+    const logItem = await db.addLog('DANA_WEBHOOK', 'SUCCESS', `Webhook Finish-Notify diterima (Signature Status: ${sigCheck.reason}) untuk Order: ${merchantTransId || 'Unknown'}`, rawBody);
     io.emit('log:new', logItem);
 
     let order = await db.findTransaction(merchantTransId);
@@ -260,6 +343,7 @@ app.post('/api/dana/finish-notify', async (req, res) => {
         orderId: merchantTransId || 'DANA-AUTO-' + Date.now(),
         merchantTransId: merchantTransId || 'DANA-AUTO-' + Date.now(),
         deviceId: 'DEPOT-001',
+        nozzleId: 1,
         customerName: 'DANA Customer Sandbox',
         title: liter === 38 ? 'Isi Ulang 2 Galon (38L)' : 'Isi Ulang 1 Galon (19L)',
         targetLiter: liter,
@@ -284,18 +368,26 @@ app.post('/api/dana/finish-notify', async (req, res) => {
     }
 
     const targetDeviceId = (order.deviceId || 'DEPOT-001').toUpperCase().trim();
+    const targetNozzleId = Number(order.nozzleId) || 1;
     const machineState = getOrCreateMachineState(targetDeviceId);
 
     machineState.status = 'PAID';
     machineState.activeOrder = {
       orderId: order.orderId,
       deviceId: targetDeviceId,
+      nozzleId: targetNozzleId,
       targetLiter: order.targetLiter,
       amount: order.amount,
       title: order.title,
       customerName: order.customerName,
       paidAt: order.paidAt
     };
+
+    // Multi-Nozzle status update
+    if (machineState.nozzles && machineState.nozzles[targetNozzleId]) {
+      machineState.nozzles[targetNozzleId].status = 'PAID';
+      machineState.nozzles[targetNozzleId].activeOrder = machineState.activeOrder;
+    }
 
     io.emit('order:paid', order);
     io.emit('machine:updated', machineState);
@@ -328,6 +420,277 @@ app.post('/api/dana/finish-notify', async (req, res) => {
     return res.status(500).json({
       response: { body: { resultInfo: { resultStatus: 'F', resultCode: 'FAILED', resultMsg: error.message } } }
     });
+  }
+});
+
+// BNI Direct API Webhook Notification Handler (SNAP BI Standard)
+app.post(['/api/bni/notification', '/api/bni/finish-notify'], async (req, res) => {
+  try {
+    const signature = req.headers['x-signature'] || req.headers['X-SIGNATURE'];
+    const timestamp = req.headers['x-timestamp'] || req.headers['X-TIMESTAMP'];
+    const bniPubKey = process.env.BNI_PUBLIC_KEY || '';
+    const verifyBni = (process.env.BNI_VERIFY_SIGNATURE || 'false').toLowerCase() === 'true';
+
+    let isSigValid = true;
+    if (verifyBni && bniPubKey) {
+      try {
+        const minifiedBody = JSON.stringify(req.body || {});
+        const sha256Body = crypto.createHash('sha256').update(minifiedBody).digest('hex').toLowerCase();
+        const stringToSign = `${req.method}|/api/bni/notification|${sha256Body}|${timestamp || ''}`;
+        const verifier = crypto.createVerify('RSA-SHA256');
+        verifier.update(stringToSign);
+        isSigValid = verifier.verify(bniPubKey, signature, 'base64');
+      } catch (e) {
+        isSigValid = false;
+      }
+    }
+
+    if (verifyBni && !isSigValid) {
+      const errLog = await db.addLog('BNI_WEBHOOK', 'ERROR', `Webhook BNI Ditolak! Signature RSA BNI tidak valid.`, req.headers);
+      io.emit('log:new', errLog);
+      return res.status(401).json({ responseCode: '4017300', responseMessage: 'Unauthorized Signature' });
+    }
+
+    const rawBody = req.body || {};
+    const trxId = rawBody.trx_id || rawBody.virtual_account || rawBody.partnerServiceId || 'BNI-TRX-' + Date.now();
+    const amountVal = Number(rawBody.trx_amount || rawBody.amount || 7000);
+
+    const logItem = await db.addLog('BNI_WEBHOOK', 'SUCCESS', `Webhook BNI Diterima untuk Trx: ${trxId} (Rp ${amountVal.toLocaleString('id-ID')})`, rawBody);
+    io.emit('log:new', logItem);
+
+    const targetDeviceId = 'DEPOT-001';
+    const targetNozzleId = 1;
+    const targetLiter = amountVal >= 14000 ? 38 : 19;
+    const machineState = getOrCreateMachineState(targetDeviceId);
+
+    machineState.status = 'PAID';
+    machineState.activeOrder = {
+      orderId: 'BNI-' + trxId,
+      deviceId: targetDeviceId,
+      nozzleId: targetNozzleId,
+      targetLiter,
+      amount: amountVal,
+      title: targetLiter === 38 ? 'Isi Ulang 2 Galon BNI (38L)' : 'Isi Ulang 1 Galon BNI (19L)',
+      customerName: 'Pelanggan BNI Direct',
+      paidAt: new Date().toISOString()
+    };
+
+    if (machineState.nozzles && machineState.nozzles[targetNozzleId]) {
+      machineState.nozzles[targetNozzleId].status = 'PAID';
+      machineState.nozzles[targetNozzleId].activeOrder = machineState.activeOrder;
+    }
+
+    io.emit('machine:updated', machineState);
+    if (targetDeviceId === 'DEPOT-001') io.emit('system:state', machineState);
+
+    return res.status(200).json({ responseCode: '2002500', responseMessage: 'Success' });
+  } catch (err) {
+    return res.status(500).json({ responseCode: '5002500', responseMessage: err.message });
+  }
+});
+
+// ==========================================
+// MIDTRANS PAYMENT GATEWAY SNAP & WEBHOOK
+// ==========================================
+
+// 1. Generate Midtrans Snap Token (QRIS, All Banks, E-Wallets, SeaBank)
+app.post('/api/midtrans/snap-token', async (req, res) => {
+  try {
+    const { packageId, customLiter, customerName, deviceId, nozzleId } = req.body;
+    const targetDeviceId = (deviceId || 'DEPOT-001').toUpperCase().trim();
+    const targetNozzleId = Number(nozzleId) || 1;
+
+    let targetLiter = 19;
+    let amount = 7000;
+    let title = 'Isi Ulang 1 Galon (19L)';
+
+    if (packageId) {
+      const packages = await db.getPackages();
+      const selected = packages.find(p => p.id === Number(packageId));
+      if (selected) {
+        targetLiter = selected.liters;
+        amount = selected.price;
+        title = `Isi Ulang ${selected.name}`;
+      }
+    } else if (customLiter > 0) {
+      targetLiter = Number(customLiter);
+      amount = Math.round((targetLiter / 19) * 7000);
+      title = `Isi Ulang Custom (${targetLiter}L)`;
+    }
+
+    const orderId = 'MIDTRANS-' + Date.now();
+    const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-oRFj2p6jrFzxUVGwO6Tj6w8B';
+    const isProd = (process.env.MIDTRANS_IS_PRODUCTION || 'false').toLowerCase() === 'true';
+    const snapApiUrl = isProd
+      ? 'https://app.midtrans.com/snap/v1/transactions'
+      : 'https://app.sandbox.midtrans.com/snap/v1/transactions';
+
+    const authHeader = 'Basic ' + Buffer.from(serverKey + ':').toString('base64');
+
+    const snapPayload = {
+      transaction_details: {
+        order_id: orderId,
+        gross_amount: amount
+      },
+      item_details: [{
+        id: 'ITEM-WATER-' + targetLiter,
+        price: amount,
+        quantity: 1,
+        name: title
+      }],
+      customer_details: {
+        first_name: customerName || 'Pelanggan Depot Air'
+      },
+      credit_card: { secure: true },
+      callbacks: {
+        finish: process.env.MIDTRANS_FINISH_URL || `${PUBLIC_BASE_URL}/`
+      }
+    };
+
+    const midtransRes = await axios.post(snapApiUrl, snapPayload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': authHeader
+      }
+    });
+
+    const newOrder = {
+      orderId,
+      merchantTransId: orderId,
+      deviceId: targetDeviceId,
+      nozzleId: targetNozzleId,
+      customerName: customerName || 'Pelanggan Depot Air',
+      title,
+      targetLiter,
+      amount,
+      currency: 'IDR',
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+      paidAt: null,
+      completedAt: null,
+      dispensedLiter: 0,
+      checkoutUrl: midtransRes.data.redirect_url,
+      snapToken: midtransRes.data.token
+    };
+
+    await db.saveTransaction(newOrder);
+
+    const logItem = await db.addLog('MIDTRANS', 'INFO', `Midtrans Snap Token dibuat [Cabang ${targetDeviceId} | Kran #${targetNozzleId}]: ${orderId} (Rp ${amount.toLocaleString('id-ID')})`, newOrder);
+    io.emit('log:new', logItem);
+    io.emit('order:created', newOrder);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Midtrans Snap Token berhasil dibuat',
+      token: midtransRes.data.token,
+      redirect_url: midtransRes.data.redirect_url,
+      clientKey: process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-gtkZISrCZJZHYwwZ',
+      data: newOrder
+    });
+  } catch (error) {
+    const errMsg = error.response && error.response.data ? JSON.stringify(error.response.data) : error.message;
+    return res.status(500).json({ success: false, message: errMsg });
+  }
+});
+
+// 2. Webhook Notification Handler Midtrans (Real-time Payment Callback)
+app.post(['/api/midtrans/notification', '/api/midtrans/finish-notify'], async (req, res) => {
+  try {
+    const notification = req.body || {};
+    const orderId = notification.order_id;
+    const statusCode = notification.status_code;
+    const grossAmount = notification.gross_amount;
+    const signatureKey = notification.signature_key;
+    const transactionStatus = notification.transaction_status;
+    const fraudStatus = notification.fraud_status;
+
+    const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-oRFj2p6jrFzxUVGwO6Tj6w8B';
+    const expectedSignature = crypto.createHash('sha512')
+      .update(`${orderId}${statusCode}${grossAmount}${serverKey}`)
+      .digest('hex');
+
+    if (signatureKey && signatureKey !== expectedSignature) {
+      const errLog = await db.addLog('MIDTRANS_WEBHOOK', 'ERROR', `Webhook Midtrans Ditolak! Signature SHA512 tidak cocok.`, notification);
+      io.emit('log:new', errLog);
+      return res.status(401).json({ success: false, message: 'Invalid Midtrans Signature' });
+    }
+
+    const logItem = await db.addLog('MIDTRANS_WEBHOOK', 'SUCCESS', `Webhook Midtrans diterima untuk Order: ${orderId} (Status: ${transactionStatus})`, notification);
+    io.emit('log:new', logItem);
+
+    let isSuccess = false;
+    if (transactionStatus === 'capture') {
+      if (fraudStatus === 'challenge') {
+        isSuccess = false;
+      } else if (fraudStatus === 'accept') {
+        isSuccess = true;
+      }
+    } else if (transactionStatus === 'settlement') {
+      isSuccess = true;
+    }
+
+    if (isSuccess) {
+      let order = await db.findTransaction(orderId);
+      if (!order) {
+        const amountVal = Number(grossAmount) || 7000;
+        const targetLiter = amountVal >= 14000 ? 38 : 19;
+        order = {
+          orderId,
+          merchantTransId: orderId,
+          deviceId: 'DEPOT-001',
+          nozzleId: 1,
+          customerName: 'Pelanggan Midtrans',
+          title: targetLiter === 38 ? 'Isi Ulang 2 Galon (38L)' : 'Isi Ulang 1 Galon (19L)',
+          targetLiter,
+          amount: amountVal,
+          currency: 'IDR',
+          status: 'PAID',
+          createdAt: new Date().toISOString(),
+          paidAt: new Date().toISOString()
+        };
+        await db.saveTransaction(order);
+      } else {
+        await db.updateTransaction(orderId, {
+          status: 'PAID',
+          paidAt: new Date().toISOString()
+        });
+        order.status = 'PAID';
+        order.paidAt = new Date().toISOString();
+      }
+
+      const targetDeviceId = (order.deviceId || 'DEPOT-001').toUpperCase().trim();
+      const targetNozzleId = Number(order.nozzleId) || 1;
+      const machineState = getOrCreateMachineState(targetDeviceId);
+
+      machineState.status = 'PAID';
+      machineState.activeOrder = {
+        orderId: order.orderId,
+        deviceId: targetDeviceId,
+        nozzleId: targetNozzleId,
+        targetLiter: order.targetLiter,
+        amount: order.amount,
+        title: order.title,
+        customerName: order.customerName,
+        paidAt: order.paidAt
+      };
+
+      if (machineState.nozzles && machineState.nozzles[targetNozzleId]) {
+        machineState.nozzles[targetNozzleId].status = 'PAID';
+        machineState.nozzles[targetNozzleId].activeOrder = machineState.activeOrder;
+      }
+
+      io.emit('order:paid', order);
+      io.emit('machine:updated', machineState);
+      if (targetDeviceId === 'DEPOT-001') io.emit('system:state', machineState);
+
+      const logSys = await db.addLog('SYSTEM', 'SUCCESS', `Pembayaran Midtrans Sukses! Mengantrikan Dispenser [Cabang ${targetDeviceId} | Kran #${targetNozzleId}]: ${order.targetLiter} Liter`, machineState.activeOrder);
+      io.emit('log:new', logSys);
+    }
+
+    return res.status(200).json({ success: true, message: 'Midtrans notification processed' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 

@@ -2,20 +2,21 @@
 // Menjalankan polling /api/esp32/check-order, mendeteksi PAID, menghitung flow simulasi, lalu POST /api/esp32/finish-fill
 const axios = require('axios');
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3005';
+const NOZZLE_ID = process.env.NOZZLE_ID || 1;
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function simulateEsp32() {
-  console.log('🤖 [ESP32 SIMULATOR] Mulai polling ke server:', BASE_URL);
+  console.log(`🤖 [ESP32 SIMULATOR] Mulai polling ke server: ${BASE_URL} (Kran / Nozzle #${NOZZLE_ID})`);
   console.log('📡 Tekan Ctrl+C untuk berhenti.\n');
 
   while (true) {
     try {
       // 1. Polling check-order
-      const checkRes = await axios.get(`${BASE_URL}/api/esp32/check-order`);
+      const checkRes = await axios.get(`${BASE_URL}/api/esp32/check-order?nozzleId=${NOZZLE_ID}`);
       const { status, orderId, targetLiter } = checkRes.data;
 
       if (status === 'PAID') {
